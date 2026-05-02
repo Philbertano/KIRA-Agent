@@ -1,0 +1,87 @@
+{
+  "_meta": {
+    "quelle": "gesetze-im-internet.de",
+    "stand": "2026-01-01",
+    "hinweis": "Kuratiertes Subset für Phase 1. Vollständige Anbindung an gesetze-im-internet.de via lookup_norm-Fallback geplant für Phase 2."
+  },
+  "paragraphen": {
+    "535": {
+      "titel": "Inhalt und Hauptpflichten des Mietvertrags",
+      "absaetze": [
+        "(1) Durch den Mietvertrag wird der Vermieter verpflichtet, dem Mieter den Gebrauch der Mietsache während der Mietzeit zu gewähren. Der Vermieter hat die Mietsache dem Mieter in einem zum vertragsgemäßen Gebrauch geeigneten Zustand zu überlassen und sie während der Mietzeit in diesem Zustand zu erhalten. Er hat die auf der Mietsache ruhenden Lasten zu tragen.",
+        "(2) Der Mieter ist verpflichtet, dem Vermieter die vereinbarte Miete zu entrichten."
+      ]
+    },
+    "536": {
+      "titel": "Mietminderung bei Sach- und Rechtsmängeln",
+      "absaetze": [
+        "(1) Hat die Mietsache zur Zeit der Überlassung an den Mieter einen Mangel, der ihre Tauglichkeit zum vertragsgemäßen Gebrauch aufhebt, oder entsteht während der Mietzeit ein solcher Mangel, so ist der Mieter für die Zeit, in der die Tauglichkeit aufgehoben ist, von der Entrichtung der Miete befreit. Für die Zeit, während der die Tauglichkeit gemindert ist, hat er nur eine angemessen herabgesetzte Miete zu entrichten. Eine unerhebliche Minderung der Tauglichkeit bleibt außer Betracht.",
+        "(1a) Für die Dauer von drei Monaten bleibt eine Minderung der Tauglichkeit außer Betracht, soweit diese auf Grund einer Maßnahme eintritt, die einer energetischen Modernisierung nach § 555b Nummer 1 dient.",
+        "(2) Absatz 1 Satz 1 und 2 gilt auch, wenn eine zugesicherte Eigenschaft fehlt oder später wegfällt.",
+        "(3) Wird dem Mieter der vertragsgemäße Gebrauch der Mietsache durch das Recht eines Dritten ganz oder zum Teil entzogen, so gelten die Absätze 1 und 2 entsprechend.",
+        "(4) Bei einem Mietverhältnis über Wohnraum ist eine zum Nachteil des Mieters abweichende Vereinbarung unwirksam."
+      ]
+    },
+    "536a": {
+      "titel": "Schadens- und Aufwendungsersatzanspruch des Mieters wegen eines Mangels",
+      "absaetze": [
+        "(1) Ist ein Mangel im Sinne des § 536 bei Vertragsschluss vorhanden oder entsteht ein solcher Mangel später wegen eines Umstands, den der Vermieter zu vertreten hat, oder kommt der Vermieter mit der Beseitigung eines Mangels in Verzug, so kann der Mieter unbeschadet der Rechte aus § 536 Schadensersatz verlangen.",
+        "(2) Der Mieter kann den Mangel selbst beseitigen und Ersatz der erforderlichen Aufwendungen verlangen, wenn 1. der Vermieter mit der Beseitigung des Mangels in Verzug ist oder 2. die umgehende Beseitigung des Mangels zur Erhaltung oder Wiederherstellung des Bestands der Mietsache notwendig ist."
+      ]
+    },
+    "536b": {
+      "titel": "Kenntnis des Mieters vom Mangel bei Vertragsschluss oder Annahme",
+      "absaetze": [
+        "Kennt der Mieter bei Vertragsschluss den Mangel der Mietsache, so stehen ihm die Rechte aus den §§ 536 und 536a nicht zu. Ist ihm der Mangel infolge grober Fahrlässigkeit unbekannt geblieben, so stehen ihm diese Rechte nur zu, wenn der Vermieter den Mangel arglistig verschwiegen hat. Nimmt der Mieter eine mangelhafte Sache an, obwohl er den Mangel kennt, so kann er die Rechte aus den §§ 536 und 536a nur geltend machen, wenn er sich diese bei der Annahme vorbehält."
+      ]
+    },
+    "536c": {
+      "titel": "Während der Mietzeit auftretende Mängel; Mängelanzeige durch den Mieter",
+      "absaetze": [
+        "(1) Zeigt sich im Laufe der Mietzeit ein Mangel der Mietsache oder wird eine Maßnahme zum Schutz der Mietsache gegen eine nicht vorhergesehene Gefahr erforderlich, so hat der Mieter dies dem Vermieter unverzüglich anzuzeigen. Das Gleiche gilt, wenn ein Dritter sich ein Recht an der Sache anmaßt.",
+        "(2) Unterlässt der Mieter die Anzeige, so ist er dem Vermieter zum Ersatz des daraus entstehenden Schadens verpflichtet. Soweit der Vermieter infolge der Unterlassung der Anzeige nicht Abhilfe schaffen konnte, ist der Mieter nicht berechtigt, 1. die in § 536 bestimmten Rechte geltend zu machen, 2. nach § 536a Abs. 1 Schadensersatz zu verlangen oder 3. ohne Bestimmung einer angemessenen Frist zur Abhilfe nach § 543 Abs. 3 Satz 1 zu kündigen."
+      ]
+    },
+    "543": {
+      "titel": "Außerordentliche fristlose Kündigung aus wichtigem Grund",
+      "absaetze": [
+        "(1) Jede Vertragspartei kann das Mietverhältnis aus wichtigem Grund außerordentlich fristlos kündigen. Ein wichtiger Grund liegt vor, wenn dem Kündigenden unter Berücksichtigung aller Umstände des Einzelfalls, insbesondere eines Verschuldens der Vertragsparteien, und unter Abwägung der beiderseitigen Interessen die Fortsetzung des Mietverhältnisses bis zum Ablauf der Kündigungsfrist oder bis zur sonstigen Beendigung des Mietverhältnisses nicht zugemutet werden kann.",
+        "(2) Ein wichtiger Grund liegt insbesondere vor, wenn 1. dem Mieter der vertragsgemäße Gebrauch der Mietsache ganz oder zum Teil nicht rechtzeitig gewährt oder wieder entzogen wird, 2. der Mieter die Rechte des Vermieters dadurch in erheblichem Maße verletzt, dass er die Mietsache durch Vernachlässigung der ihm obliegenden Sorgfalt erheblich gefährdet oder sie unbefugt einem Dritten überlässt oder 3. der Mieter a) für zwei aufeinander folgende Termine mit der Entrichtung der Miete oder eines nicht unerheblichen Teils der Miete in Verzug ist oder b) in einem Zeitraum, der sich über mehr als zwei Termine erstreckt, mit der Entrichtung der Miete in Höhe eines Betrages in Verzug ist, der die Miete für zwei Monate erreicht."
+      ]
+    },
+    "558": {
+      "titel": "Mieterhöhung bis zur ortsüblichen Vergleichsmiete",
+      "absaetze": [
+        "(1) Der Vermieter kann die Zustimmung zu einer Erhöhung der Miete bis zur ortsüblichen Vergleichsmiete verlangen, wenn die Miete in dem Zeitpunkt, zu dem die Erhöhung eintreten soll, seit 15 Monaten unverändert ist. Das Mieterhöhungsverlangen kann frühestens ein Jahr nach der letzten Mieterhöhung geltend gemacht werden.",
+        "(3) Bei Erhöhungen nach Absatz 1 darf sich die Miete innerhalb von drei Jahren, von Erhöhungen nach den §§ 559 bis 560 abgesehen, nicht um mehr als 20 vom Hundert erhöhen (Kappungsgrenze)."
+      ]
+    },
+    "569": {
+      "titel": "Außerordentliche fristlose Kündigung aus wichtigem Grund (Wohnraum)",
+      "absaetze": [
+        "(3) Ergänzend zu § 543 Abs. 2 Satz 1 Nr. 3 gilt: 1. Im Falle des § 543 Abs. 2 Satz 1 Nr. 3 Buchstabe a ist der rückständige Teil der Miete nur dann als nicht unerheblich anzusehen, wenn er die Miete für einen Monat übersteigt. 2. Die Kündigung wird auch dann unwirksam, wenn der Vermieter spätestens bis zum Ablauf von zwei Monaten nach Eintritt der Rechtshängigkeit des Räumungsanspruchs hinsichtlich der fälligen Miete und der fälligen Entschädigung nach § 546a Abs. 1 befriedigt wird oder sich eine öffentliche Stelle zur Befriedigung verpflichtet."
+      ]
+    },
+    "573": {
+      "titel": "Ordentliche Kündigung des Vermieters",
+      "absaetze": [
+        "(1) Der Vermieter kann nur kündigen, wenn er ein berechtigtes Interesse an der Beendigung des Mietverhältnisses hat. Die Kündigung zum Zwecke der Mieterhöhung ist ausgeschlossen.",
+        "(2) Ein berechtigtes Interesse des Vermieters an der Beendigung des Mietverhältnisses liegt insbesondere vor, wenn 1. der Mieter seine vertraglichen Pflichten schuldhaft nicht unerheblich verletzt hat, 2. der Vermieter die Räume als Wohnung für sich, seine Familienangehörigen oder Angehörige seines Haushalts benötigt (Eigenbedarf) oder 3. der Vermieter durch die Fortsetzung des Mietverhältnisses an einer angemessenen wirtschaftlichen Verwertung des Grundstücks gehindert würde und dadurch erhebliche Nachteile erleiden würde.",
+        "(3) Die Gründe für ein berechtigtes Interesse des Vermieters sind in dem Kündigungsschreiben anzugeben."
+      ]
+    },
+    "573c": {
+      "titel": "Fristen der ordentlichen Kündigung",
+      "absaetze": [
+        "(1) Die Kündigung ist spätestens am dritten Werktag eines Kalendermonats zum Ablauf des übernächsten Monats zulässig. Die Kündigungsfrist für den Vermieter verlängert sich nach fünf und acht Jahren seit der Überlassung des Wohnraums um jeweils drei Monate."
+      ]
+    },
+    "574": {
+      "titel": "Widerspruch des Mieters gegen die Kündigung (Sozialklausel)",
+      "absaetze": [
+        "(1) Der Mieter kann der Kündigung des Vermieters widersprechen und von ihm die Fortsetzung des Mietverhältnisses verlangen, wenn die Beendigung des Mietverhältnisses für den Mieter, seine Familie oder einen anderen Angehörigen seines Haushalts eine Härte bedeuten würde, die auch unter Würdigung der berechtigten Interessen des Vermieters nicht zu rechtfertigen ist. Dies gilt nicht, wenn ein Grund vorliegt, der den Vermieter zur außerordentlichen fristlosen Kündigung berechtigt.",
+        "(2) Eine Härte liegt auch vor, wenn angemessener Ersatzwohnraum zu zumutbaren Bedingungen nicht beschafft werden kann."
+      ]
+    }
+  }
+}
