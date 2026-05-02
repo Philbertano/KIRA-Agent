@@ -88,7 +88,27 @@ kira ask data/beispielsachverhalte/001_mietminderung_schimmel.md \
 
 # Modell explizit erzwingen
 kira ask … --force-tier opus
+
+# Aktuelle Gesetzes-Korpora von gesetze-im-internet.de laden
+kira ingest                      # alle bekannten (bgb, betrkv, heizkostenv)
+kira ingest bgb                  # gezielt
+kira ingest --output-dir ./data/gesetze
 ```
+
+### Gesetzes-Korpus
+
+KIRA versucht zuerst, Gesetze aus `./data/gesetze/<abk>.json` zu laden
+(Overlay, vom `kira ingest`-Befehl geschrieben). Findet sie dort nichts,
+fällt sie auf den im Package gebündelten **kuratierten Korpus** zurück:
+
+| Gesetz | Quelle | Subset |
+|---|---|---|
+| BGB | gesetze-im-internet.de | §§ 195, 199, 286 (Verjährung/Verzug); §§ 535–580a (Mietrecht) |
+| BetrKV | gesetze-im-internet.de | komplett |
+| HeizkostenV | gesetze-im-internet.de | komplett |
+
+Wenn der lokale Korpus älter als 6 Monate ist, warnt jedes Tool im Output —
+der Anwalt sieht sofort, dass er `kira ingest` neu ausführen sollte.
 
 ### Sachverhalts-Format
 
@@ -129,7 +149,9 @@ Konjunktionen, mehrere Fragen), routet der Router automatisch zu Opus.
 
 | Tool | Quelle | Zweck |
 |---|---|---|
-| `lookup_norm` | lokaler BGB-Korpus | §§ 535–580a im Wortlaut |
+| `lookup_norm` | lokaler Multi-Gesetz-Korpus (BGB, BetrKV, HeizkostenV) | Norm im Wortlaut, mit Stand + Quellen-URL |
+| `search_norm` | lokaler Korpus, Volltext | Stichwort-Suche, wenn Norm noch unbekannt |
+| `list_normen` | lokaler Korpus | Inhaltsverzeichnis / Übersicht der Gesetze |
 | `search_rechtsprechung` | openjur.de (Whitelist) | Urteils-Suche |
 | `fetch_urteil` | rechtsprechung-im-internet.de, openjur.de, dejure.org, BGH | Volltext eines Urteils |
 | `berechne_frist` | deterministisch in Python | Kündigung, Widerspruch, Verjährung |

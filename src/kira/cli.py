@@ -91,6 +91,55 @@ def ask(
 
 
 @app.command()
+def ingest(
+    gesetze: list[str] = typer.Argument(
+        None,
+        help=(
+            "Gesetzes-Abkürzungen, die geladen werden sollen "
+            "(z.B. bgb betrkv heizkostenv). Ohne Argument: alle bekannten."
+        ),
+    ),
+    output_dir: Path = typer.Option(
+        None, "--output-dir", help="Wohin die JSON-Korpora geschrieben werden."
+    ),
+    log_level: str = typer.Option("INFO", "--log-level"),
+) -> None:
+    """Lädt Gesetzes-Korpora von gesetze-im-internet.de und speichert sie lokal.
+
+    Aktualisiert den lokalen Overlay-Korpus, der vom Agent bevorzugt vor den
+    im Package gebündelten kuratierten JSONs verwendet wird.
+    """
+    _setup_logging(log_level)
+    from kira.knowledge.ingest import GESETZE, ingest as do_ingest
+
+    if gesetze:
+        unbekannt = [g for g in gesetze if g.lower() not in GESETZE]
+        if unbekannt:
+            verfuegbar = ", ".join(GESETZE.keys())
+            console.print(
+                f"[red]Unbekannte Gesetze: {unbekannt}.[/red] Verfügbar: {verfuegbar}"
+            )
+            raise typer.Exit(code=1)
+
+    console.print(Panel.fit(
+        f"Lade {gesetze or list(GESETZE.keys())} von gesetze-im-internet.de…",
+        border_style="cyan",
+    ))
+    try:
+        written = do_ingest(gesetze, output_dir=output_dir)
+    except Exception as exc:
+        console.print(f"[red]FEHLER:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    table = Table(title="Geladene Gesetze")
+    table.add_column("Abkürzung")
+    table.add_column("Pfad")
+    for abk, path in written.items():
+        table.add_row(abk, str(path))
+    console.print(table)
+
+
+@app.command()
 def demo(
     backend: str = typer.Option("bedrock_eu", "--backend"),
     force_tier: str | None = typer.Option(None, "--force-tier"),

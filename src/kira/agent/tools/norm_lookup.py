@@ -1,85 +1,77 @@
-"""Tool: lookup_norm — schlägt einen § aus dem BGB-Mietrecht nach.
+"""Tool: lookup_norm — schlägt eine Vorschrift in einem deutschen Gesetz nach.
 
-Phase 1: lokaler kuratierter Korpus (siehe knowledge/gesetze/bgb_mietrecht.json).
-Phase 2: Fallback auf gesetze-im-internet.de mit lokalem Cache.
+Multi-Gesetz-Support: BGB, BetrKV, HeizkostenV, ... (alles, was in
+``kira.knowledge.gesetze/*.json`` oder im Overlay-Verzeichnis liegt).
+
+Der Stand des Korpus wird im Output mit ausgegeben — Tools warnen, wenn
+der lokale Stand älter als 6 Monate ist.
 """
 
 from __future__ import annotations
 
-import json
-import re
-from importlib import resources
 from typing import Any
 
 from kira.agent.tools._registry import Tool, register
-
-
-def _load_corpus() -> dict[str, Any]:
-    with resources.files("kira.knowledge.gesetze").joinpath("bgb_mietrecht.json").open(
-        encoding="utf-8"
-    ) as f:
-        return json.load(f)
-
-
-_CORPUS_CACHE: dict[str, Any] | None = None
-
-
-def _corpus() -> dict[str, Any]:
-    global _CORPUS_CACHE
-    if _CORPUS_CACHE is None:
-        _CORPUS_CACHE = _load_corpus()
-    return _CORPUS_CACHE
-
-
-def _normalize_paragraph(query: str) -> str:
-    """Akzeptiert '§ 535', '§535 BGB', '535', '536a' usw."""
-    # Entferne § und 'BGB', behalte Buchstabensuffix wie 'a', 'b'
-    cleaned = re.sub(r"§|BGB", "", query, flags=re.IGNORECASE).strip()
-    match = re.match(r"^\s*(\d+[a-z]?)\s*", cleaned)
-    if not match:
-        return cleaned
-    return match.group(1)
+from kira.knowledge.loader import list_gesetze, load_gesetz, stand_warnung
 
 
 def run(input_data: dict[str, Any]) -> str:
-    paragraph = _normalize_paragraph(str(input_data.get("paragraph", "")))
+    paragraph = str(input_data.get("paragraph", "")).strip()
     if not paragraph:
         return "FEHLER: Kein Paragraph angegeben."
 
-    paragraphen = _corpus().get("paragraphen", {})
-    norm = paragraphen.get(paragraph)
-    if not norm:
-        verfuegbar = ", ".join(sorted(paragraphen.keys()))
+    abkuerzung = str(input_data.get("gesetz", "BGB")).strip() or "BGB"
+    gesetz = load_gesetz(abkuerzung)
+    if gesetz is None:
+        verfuegbar = ", ".join(g.upper() for g in list_gesetze())
         return (
-            f"§ {paragraph} BGB ist im lokalen Mietrechts-Korpus nicht enthalten. "
-            f"Verfügbar (Phase 1): {verfuegbar}. "
-            f"Bitte für die rechtliche Würdigung kennzeichnen, dass diese Norm nicht "
-            f"verifiziert werden konnte."
+            f"FEHLER: Gesetz {abkuerzung!r} nicht im Korpus. "
+            f"Verfügbar: {verfuegbar}."
         )
 
-    meta = _corpus().get("_meta", {})
-    body = "\n".join(norm["absaetze"])
-    return (
-        f"§ {paragraph} BGB — {norm['titel']}\n"
-        f"(Quelle: {meta.get('quelle', 'unbekannt')}, Stand {meta.get('stand', 'n/a')})\n\n"
-        f"{body}"
-    )
+    norm = gesetz.get(paragraph)
+    if norm is None:
+        verfuegbare = ", ".join(gesetz.list_paragraphen())
+        return (
+            f"§ {paragraph} {gesetz.abkuerzung} ist im lokalen Korpus nicht enthalten.\n"
+            f"Verfügbar: {verfuegbare}.\n"
+            f"Hinweis: Wenn die Vorschrift existiert, aber im Korpus fehlt, bitte "
+            f"'kira ingest {gesetz.abkuerzung.lower()}' ausführen oder den Anwalt "
+            f"informieren — NICHT aus dem Gedächtnis zitieren."
+        )
+
+    output = norm.to_display(stand=gesetz.stand)
+    warnung = stand_warnung(gesetz.stand)
+    if warnung:
+        output = f"{warnung}\n\n{output}"
+    return output
 
 
 TOOL = register(
     Tool(
         name="lookup_norm",
         description=(
-            "Schlägt eine Vorschrift aus dem BGB-Mietrecht (§§ 535–580a) im Wortlaut nach. "
-            "Verwende dieses Tool, BEVOR du eine Norm zitierst — niemals aus dem Gedächtnis."
+            "Schlägt eine Vorschrift aus einem deutschen Gesetz im Wortlaut nach "
+            "(BGB, BetrKV, HeizkostenV — vollständige Liste via list_gesetze). "
+            "Verwende dieses Tool IMMER, BEVOR du eine Norm zitierst — niemals "
+            "aus dem Gedächtnis. Output enthält Stand-Datum und Quellen-URL zur "
+            "Verifikation durch den Anwalt."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "paragraph": {
                     "type": "string",
-                    "description": "Paragraph, z.B. '535', '536a', '§ 573 BGB'.",
-                }
+                    "description": "Paragraph-Nummer, z.B. '535', '536a', '§ 573 BGB'.",
+                },
+                "gesetz": {
+                    "type": "string",
+                    "description": (
+                        "Gesetzes-Abkürzung. Default: 'BGB'. "
+                        "Andere: 'BetrKV', 'HeizkostenV'."
+                    ),
+                    "default": "BGB",
+                },
             },
             "required": ["paragraph"],
         },

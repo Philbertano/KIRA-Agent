@@ -1,0 +1,29 @@
+{
+  "_meta": {
+    "abkuerzung": "HeizkostenV",
+    "titel": "Verordnung über Heizkostenabrechnung (Heizkostenverordnung)",
+    "stand": "2026-01-01",
+    "quelle": "gesetze-im-internet.de (kuratiert)",
+    "quelle_url": "https://www.gesetze-im-internet.de/heizkostenv",
+    "gefiltert_auf": ["§§ 7, 9 (Verteilung der Kosten / Kürzungsrecht)"],
+    "anzahl_normen": 2,
+    "hinweis": "Übergangs-Korpus für Phase 1. 'kira ingest heizkostenv' lädt das vollständige Verordnungsgesetz."
+  },
+  "paragraphen": {
+    "7": {
+      "titel": "Verteilung der Kosten der Versorgung mit Wärme",
+      "absaetze": [
+        "(1) Von den Kosten des Betriebs der zentralen Heizungsanlage sind mindestens 50 vom Hundert, höchstens 70 vom Hundert nach dem erfassten Wärmeverbrauch der Nutzer zu verteilen. Die übrigen Kosten sind nach der Wohn- oder Nutzfläche oder nach dem umbauten Raum zu verteilen.",
+        "(2) Zu den Kosten des Betriebs der zentralen Heizungsanlage gehören die Kosten der verbrauchten Brennstoffe und ihrer Lieferung, die Kosten des Betriebsstroms, die Kosten der Bedienung, Überwachung und Pflege der Anlage, der regelmäßigen Prüfung ihrer Betriebsbereitschaft und Betriebssicherheit einschließlich der Einstellung durch eine Fachkraft, der Reinigung der Anlage und des Betriebsraums, die Kosten der Messungen nach dem Bundes-Immissionsschutzgesetz, die Kosten der Anmietung oder anderer Arten der Gebrauchsüberlassung einer Ausstattung zur Verbrauchserfassung sowie die Kosten ihrer Eichung und der Berechnung, Aufteilung und Verbrauchsanalyse."
+      ],
+      "quelle_url": "https://www.gesetze-im-internet.de/heizkostenv/__7.html"
+    },
+    "9": {
+      "titel": "Kürzungsrecht des Nutzers",
+      "absaetze": [
+        "(2) Soweit die Kosten der Versorgung mit Wärme oder Warmwasser entgegen den Vorschriften dieser Verordnung nicht verbrauchsabhängig abgerechnet werden, hat der Nutzer das Recht, bei der nicht verbrauchsabhängigen Abrechnung der Kosten den auf ihn entfallenden Anteil um 15 vom Hundert zu kürzen. Wird der Verbrauch der Nutzer entgegen § 5 Absatz 2 nicht mit Geräten erfasst, die fernablesbar sind, hat der Nutzer ab dem Abrechnungszeitraum, der auf den 1. Dezember 2022 folgt, zusätzlich das Recht, den auf ihn entfallenden Anteil der Kosten um 3 Prozent zu kürzen."
+      ],
+      "quelle_url": "https://www.gesetze-im-internet.de/heizkostenv/__9.html"
+    }
+  }
+}
