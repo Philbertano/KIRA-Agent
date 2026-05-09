@@ -62,11 +62,19 @@ class LegalSourcesStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
 
+        # ARM64 matches the bundling host on Apple Silicon (Docker pulls
+        # arm64 layers by default), so compiled wheels (pydantic_core) load
+        # natively. ARM64 Lambda is also ~20% cheaper than x86_64.
+        arch = lambda_.Architecture.ARM_64
+
         # Code bundling: zip src/kira/ as the Lambda payload.
+        # `platform="linux/arm64"` forces Docker to pull the matching image
+        # variant even on multi-arch hosts.
         code = lambda_.Code.from_asset(
             str(REPO_ROOT),
             bundling=cdk.BundlingOptions(
                 image=lambda_.Runtime.PYTHON_3_11.bundling_image,
+                platform="linux/arm64",
                 command=[
                     "bash",
                     "-c",
@@ -83,6 +91,7 @@ class LegalSourcesStack(cdk.Stack):
             "LookupNormFn",
             function_name="kira-legal-lookup-norm",
             runtime=lambda_.Runtime.PYTHON_3_11,
+            architecture=arch,
             handler="kira.legal_sources.adapters.lookup_handler.handler",
             code=code,
             memory_size=512,
@@ -98,6 +107,7 @@ class LegalSourcesStack(cdk.Stack):
             "IngestFn",
             function_name="kira-legal-ingest",
             runtime=lambda_.Runtime.PYTHON_3_11,
+            architecture=arch,
             handler="kira.legal_sources.adapters.ingest_handler.handler",
             code=code,
             memory_size=1024,
