@@ -30,6 +30,10 @@ dev = [
   "pytest-cov>=5.0.0",
   "ruff>=0.4.0",
   "mypy>=1.10.0",
+  "moto>=5.0.0",
+  "respx>=0.21.0",
+  "aws-cdk-lib>=2.140.0",
+  "constructs>=10.0.0",
 ]
 
 [project.scripts]
@@ -51,4 +55,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q"
+addopts = "-ra -q -m 'not live'"
+markers = [
+    "live: opt-in tests that hit the live network or AWS; require RUN_LIVE_TESTS=1",
+]
