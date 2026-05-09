@@ -110,3 +110,89 @@ def test_warm_cache_skips_s3_within_recheck_window(monkeypatch, s3_corpus_bucket
     )
     third = loader.load_all()
     assert "betrkv" in third
+
+
+def test_local_dir_with_malformed_json_skips_file(tmp_path, monkeypatch):
+    """Test that malformed JSON files are skipped with a warning."""
+    src = json.loads((FIXTURES / "bgb_subset.json").read_text(encoding="utf-8"))
+    target = tmp_path / "gesetze"
+    target.mkdir()
+    # Add a good file
+    (target / "bgb.json").write_text(json.dumps(src), encoding="utf-8")
+    # Add a malformed file
+    (target / "broken.json").write_text("{ invalid json }", encoding="utf-8")
+    monkeypatch.setenv("LEGAL_CORPUS_LOCAL_DIR", str(tmp_path))
+
+    loader = CorpusLoader.from_env()
+    corpus = loader.load_all()
+
+    # Should still load the good file and skip the broken one
+    assert "bgb" in corpus
+    assert "broken" not in corpus
+
+
+def test_s3_manifest_read_error_raises_corpus_unavailable(monkeypatch, aws_creds, tmp_path):
+    """Test that S3 manifest read error raises CorpusUnavailableError."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-central-1")
+        s3.create_bucket(
+            Bucket="test-corpus",
+            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+        )
+        # Bucket exists but manifest doesn't
+        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
+        monkeypatch.setattr(
+            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+            tmp_path / "cache",
+        )
+        with pytest.raises(CorpusUnavailableError):
+            CorpusLoader.from_env().load_all()
+
+
+def test_s3_with_malformed_corpus_file_skips_it(monkeypatch, aws_creds, tmp_path):
+    """Test that malformed corpus files in S3 are skipped."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-central-1")
+        s3.create_bucket(
+            Bucket="test-corpus",
+            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+        )
+        # Add a broken file and a good file
+        bgb = (FIXTURES / "bgb_subset.json").read_text(encoding="utf-8")
+        s3.put_object(Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8"))
+        s3.put_object(Bucket="test-corpus", Key="gesetze/broken.json", Body=b"{ invalid }")
+        manifest = json.dumps({"version": 1, "files": ["gesetze/bgb.json", "gesetze/broken.json"]})
+        s3.put_object(Bucket="test-corpus", Key="gesetze/_manifest.json", Body=manifest.encode("utf-8"))
+
+        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
+        monkeypatch.setattr(
+            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+            tmp_path / "cache",
+        )
+        loader = CorpusLoader.from_env()
+        corpus = loader.load_all()
+
+        # Should load bgb and skip the broken file
+        assert "bgb" in corpus
+        assert "broken" not in corpus
+
+
+def test_s3_empty_manifest_raises_corpus_unavailable(monkeypatch, aws_creds, tmp_path):
+    """Test that an S3 manifest with no usable files raises CorpusUnavailableError."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-central-1")
+        s3.create_bucket(
+            Bucket="test-corpus",
+            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+        )
+        # Empty manifest
+        manifest = json.dumps({"version": 1, "files": []})
+        s3.put_object(Bucket="test-corpus", Key="gesetze/_manifest.json", Body=manifest.encode("utf-8"))
+
+        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
+        monkeypatch.setattr(
+            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+            tmp_path / "cache",
+        )
+        with pytest.raises(CorpusUnavailableError):
+            CorpusLoader.from_env().load_all()

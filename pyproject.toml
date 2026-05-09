@@ -61,3 +61,12 @@ asyncio_mode = "auto"
 markers = [
     "live: opt-in tests that hit the live network or AWS; require RUN_LIVE_TESTS=1",
 ]
+
+[tool.coverage.run]
+source = ["src/kira/legal_sources/_common", "src/kira/legal_sources/gesetze"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = false

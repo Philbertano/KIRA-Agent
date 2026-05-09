@@ -103,3 +103,28 @@ def test_unparseable_stand_emits_warning(bgb_korpus):
     assert isinstance(result, LookupNormSuccess)
     assert result.stand_warnung is not None
     assert "unleserlich" in result.stand_warnung
+
+
+def test_error_to_agent_text_formats_correctly():
+    """Test that LookupNormError.to_agent_text() properly formats error messages."""
+    from kira.legal_sources.gesetze.schema import LookupNormError, LookupNormErrorCode
+
+    err = LookupNormError(
+        error=LookupNormErrorCode.UNKNOWN_GESETZ,
+        message="Test error message",
+    )
+    text = err.to_agent_text()
+    assert "FEHLER" in text
+    assert "unknown_gesetz" in text
+    assert "Test error message" in text
+
+
+def test_norm_with_no_absaetze_returns_empty_text():
+    """Test edge case where a norm exists but has no absaetze list."""
+    from kira.legal_sources.gesetze.corpus_format import Norm
+    from kira.legal_sources.gesetze.lookup_norm import _select_text
+
+    norm_no_absatz = Norm(paragraph="535", titel="Test", absaetze=[], quelle_url="http://test")
+    text, absatz_num = _select_text(norm_no_absatz, None)
+    assert text == ""
+    assert absatz_num is None
