@@ -22,3 +22,4 @@ htmlcov/
 data/mandate/
 data/cache/
 *.pseudo-mapping
+.worktrees/
