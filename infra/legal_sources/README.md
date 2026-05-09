@@ -10,7 +10,10 @@
 
 ## First deploy
 
+The `cdk.json` invokes `python3 app.py`. **Activate the project venv first** so `aws_cdk` resolves:
+
 ```bash
+source .venv/bin/activate                 # from repo root
 cd infra/legal_sources
 cdk bootstrap aws://${AWS_ACCOUNT_ID}/eu-central-1   # one-time per account/region
 cdk deploy KiraLegalSources --require-approval never
