@@ -9,7 +9,7 @@ def test_parses_valid_corpus_payload():
             "stand": "2026-05-08",
             "quelle": "gesetze-im-internet.de",
             "quelle_url": "https://www.gesetze-im-internet.de/bgb",
-            "gefiltert_auf": ["§§ 194–580a"],
+            "gefiltert_auf": ["§§ 194–580a"],  # noqa: RUF001
             "anzahl_normen": 1,
         },
         "paragraphen": {

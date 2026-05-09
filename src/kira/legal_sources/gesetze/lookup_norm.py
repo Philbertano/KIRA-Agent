@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
-from typing import Mapping
 
 from kira.legal_sources.gesetze.corpus_format import GesetzKorpus, Norm
 from kira.legal_sources.gesetze.schema import (
@@ -13,7 +13,6 @@ from kira.legal_sources.gesetze.schema import (
     LookupNormResult,
     LookupNormSuccess,
 )
-
 
 _STAND_WARN_AGE = timedelta(days=30)
 

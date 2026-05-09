@@ -1,9 +1,7 @@
 import os
 
 import aws_cdk as cdk
-
 from stack import LegalSourcesStack
-
 
 app = cdk.App()
 LegalSourcesStack(

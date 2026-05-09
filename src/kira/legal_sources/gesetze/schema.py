@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-from enum import Enum
-from typing import Union
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 _PARAGRAPH_PATTERN = re.compile(r"^\d+[a-zA-Z]?$")
 
@@ -37,7 +35,7 @@ class LookupNormInput(BaseModel):
         return v
 
 
-class LookupNormErrorCode(str, Enum):
+class LookupNormErrorCode(StrEnum):
     UNKNOWN_GESETZ = "unknown_gesetz"
     PARAGRAPH_NOT_FOUND = "paragraph_not_found"
     ABSATZ_NOT_FOUND = "absatz_not_found"
@@ -81,4 +79,4 @@ class LookupNormError(BaseModel):
         return f"FEHLER ({self.error.value}): {self.message}"
 
 
-LookupNormResult = Union[LookupNormSuccess, LookupNormError]
+LookupNormResult = LookupNormSuccess | LookupNormError

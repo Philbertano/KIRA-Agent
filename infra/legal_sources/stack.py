@@ -9,17 +9,27 @@ from pathlib import Path
 
 import aws_cdk as cdk
 from aws_cdk import (
-    aws_events as events,
-    aws_events_targets as targets,
-    aws_iam as iam,
-    aws_kms as kms,
-    aws_lambda as lambda_,
-    aws_logs as logs,
-    aws_s3 as s3,
     aws_cloudwatch as cw,
 )
+from aws_cdk import (
+    aws_events as events,
+)
+from aws_cdk import (
+    aws_events_targets as targets,
+)
+from aws_cdk import (
+    aws_kms as kms,
+)
+from aws_cdk import (
+    aws_lambda as lambda_,
+)
+from aws_cdk import (
+    aws_logs as logs,
+)
+from aws_cdk import (
+    aws_s3 as s3,
+)
 from constructs import Construct
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

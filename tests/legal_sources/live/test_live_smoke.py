@@ -32,12 +32,13 @@ def test_live_bgb_xml_zip_parseable():
 
 def test_live_lookup_norm_against_real_corpus(tmp_path, monkeypatch):
     """Run the actual ingest pipeline once, then lookup_norm against it."""
-    from kira.legal_sources.gesetze.lookup_norm import lookup_norm
-    from kira.legal_sources.gesetze.schema import LookupNormInput
+    import json
+
+    from kira.knowledge.ingest import GESETZE
     from kira.legal_sources._common.s3_corpus import CorpusLoader
     from kira.legal_sources.adapters.ingest_handler import _build_payload
-    from kira.knowledge.ingest import GESETZE
-    import json
+    from kira.legal_sources.gesetze.lookup_norm import lookup_norm
+    from kira.legal_sources.gesetze.schema import LookupNormInput
 
     target = tmp_path / "gesetze"
     target.mkdir()

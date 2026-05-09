@@ -1,12 +1,12 @@
 import json
-import os
 from pathlib import Path
 
+import boto3
 import pytest
+from moto import mock_aws
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
 from kira.legal_sources._common.s3_corpus import CorpusLoader
-
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -42,10 +42,6 @@ def test_no_env_set_raises_corpus_unavailable():
         CorpusLoader.from_env().load_all()
 
 
-import boto3
-from moto import mock_aws
-
-
 @pytest.fixture
 def aws_creds(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
@@ -62,9 +58,15 @@ def s3_corpus_bucket(aws_creds):
             CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
         )
         bgb = (FIXTURES / "bgb_subset.json").read_text(encoding="utf-8")
-        s3.put_object(Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8"))
+        s3.put_object(
+            Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8")
+        )
         manifest = json.dumps({"version": 1, "files": ["gesetze/bgb.json"]})
-        s3.put_object(Bucket="test-corpus", Key="gesetze/_manifest.json", Body=manifest.encode("utf-8"))
+        s3.put_object(
+            Bucket="test-corpus",
+            Key="gesetze/_manifest.json",
+            Body=manifest.encode("utf-8"),
+        )
         yield "test-corpus"
 
 
@@ -87,7 +89,7 @@ def test_warm_cache_skips_s3_within_recheck_window(monkeypatch, s3_corpus_bucket
         tmp_path / "cache",
     )
     loader = CorpusLoader.from_env()
-    first = loader.load_all()
+    loader.load_all()  # populate the warm cache
     # Mutate S3 to add a new gesetz; warm load must NOT see it.
     s3 = boto3.client("s3", region_name="eu-central-1")
     second_payload = json.dumps({
@@ -98,15 +100,22 @@ def test_warm_cache_skips_s3_within_recheck_window(monkeypatch, s3_corpus_bucket
         },
         "paragraphen": {},
     })
-    s3.put_object(Bucket=s3_corpus_bucket, Key="gesetze/betrkv.json", Body=second_payload.encode("utf-8"))
+    s3.put_object(
+        Bucket=s3_corpus_bucket,
+        Key="gesetze/betrkv.json",
+        Body=second_payload.encode("utf-8"),
+    )
     second = loader.load_all()  # within recheck window
     assert "betrkv" not in second
     # Force recheck: backdate the manifest-checked-at timestamp
     loader._manifest_checked_at = 0.0
+    new_manifest = json.dumps(
+        {"version": 2, "files": ["gesetze/bgb.json", "gesetze/betrkv.json"]}
+    )
     s3.put_object(
         Bucket=s3_corpus_bucket,
         Key="gesetze/_manifest.json",
-        Body=json.dumps({"version": 2, "files": ["gesetze/bgb.json", "gesetze/betrkv.json"]}).encode("utf-8"),
+        Body=new_manifest.encode("utf-8"),
     )
     third = loader.load_all()
     assert "betrkv" in third
@@ -159,10 +168,20 @@ def test_s3_with_malformed_corpus_file_skips_it(monkeypatch, aws_creds, tmp_path
         )
         # Add a broken file and a good file
         bgb = (FIXTURES / "bgb_subset.json").read_text(encoding="utf-8")
-        s3.put_object(Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8"))
-        s3.put_object(Bucket="test-corpus", Key="gesetze/broken.json", Body=b"{ invalid }")
-        manifest = json.dumps({"version": 1, "files": ["gesetze/bgb.json", "gesetze/broken.json"]})
-        s3.put_object(Bucket="test-corpus", Key="gesetze/_manifest.json", Body=manifest.encode("utf-8"))
+        s3.put_object(
+            Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8")
+        )
+        s3.put_object(
+            Bucket="test-corpus", Key="gesetze/broken.json", Body=b"{ invalid }"
+        )
+        manifest = json.dumps(
+            {"version": 1, "files": ["gesetze/bgb.json", "gesetze/broken.json"]}
+        )
+        s3.put_object(
+            Bucket="test-corpus",
+            Key="gesetze/_manifest.json",
+            Body=manifest.encode("utf-8"),
+        )
 
         monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
         monkeypatch.setattr(
@@ -187,7 +206,11 @@ def test_s3_empty_manifest_raises_corpus_unavailable(monkeypatch, aws_creds, tmp
         )
         # Empty manifest
         manifest = json.dumps({"version": 1, "files": []})
-        s3.put_object(Bucket="test-corpus", Key="gesetze/_manifest.json", Body=manifest.encode("utf-8"))
+        s3.put_object(
+            Bucket="test-corpus",
+            Key="gesetze/_manifest.json",
+            Body=manifest.encode("utf-8"),
+        )
 
         monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
         monkeypatch.setattr(

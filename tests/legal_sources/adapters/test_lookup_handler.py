@@ -53,6 +53,7 @@ def test_handler_corpus_unavailable_returns_error(monkeypatch):
     monkeypatch.delenv("LEGAL_CORPUS_BUCKET", raising=False)
     # Need to reset module-level loader cache between tests.
     import importlib
+
     import kira.legal_sources.adapters.lookup_handler as mod
     importlib.reload(mod)
 

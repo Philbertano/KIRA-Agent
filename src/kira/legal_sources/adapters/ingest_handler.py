@@ -95,7 +95,7 @@ def _build_payload(client: httpx.Client, cfg: GesetzKonfiguration) -> dict[str, 
             "quelle": "gesetze-im-internet.de",
             "quelle_url": cfg.base_url,
             "gefiltert_auf": (
-                [f"§§ {cfg.paragraph_range[0]}–{cfg.paragraph_range[1]}"]
+                [f"§§ {cfg.paragraph_range[0]}–{cfg.paragraph_range[1]}"]  # noqa: RUF001
                 if cfg.paragraph_range
                 else (cfg.paragraphen or ["vollständig"])
             ),

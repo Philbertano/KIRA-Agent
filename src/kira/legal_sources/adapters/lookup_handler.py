@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -16,7 +15,6 @@ from kira.legal_sources.gesetze.schema import (
     LookupNormErrorCode,
     LookupNormInput,
 )
-
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)

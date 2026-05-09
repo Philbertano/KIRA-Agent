@@ -69,7 +69,7 @@ def test_paragraph_not_in_corpus_returns_error(bgb_korpus):
     result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
     assert isinstance(result, LookupNormError)
     assert result.error == LookupNormErrorCode.PARAGRAPH_NOT_FOUND
-    assert "§§ 535–540" in result.message  # range from fixture meta
+    assert "§§ 535–540" in result.message  # range from fixture meta  # noqa: RUF001
 
 
 def test_absatz_not_in_norm_returns_error(bgb_korpus):

@@ -22,7 +22,6 @@ from typing import Any
 from kira.legal_sources._common.errors import CorpusUnavailableError
 from kira.legal_sources.gesetze.corpus_format import GesetzKorpus
 
-
 log = logging.getLogger(__name__)
 
 ENV_LOCAL_DIR = "LEGAL_CORPUS_LOCAL_DIR"
@@ -41,7 +40,7 @@ class CorpusLoader:
     _manifest_checked_at: float = 0.0
 
     @classmethod
-    def from_env(cls) -> "CorpusLoader":
+    def from_env(cls) -> CorpusLoader:
         local = os.environ.get(ENV_LOCAL_DIR)
         bucket = os.environ.get(ENV_S3_BUCKET)
         return cls(
@@ -61,7 +60,11 @@ class CorpusLoader:
     # --- local ---
 
     def _load_local(self) -> dict[str, GesetzKorpus]:
-        gesetze_dir = self.local_dir / "gesetze" if self.local_dir.name != "gesetze" else self.local_dir
+        gesetze_dir = (
+            self.local_dir / "gesetze"
+            if self.local_dir.name != "gesetze"
+            else self.local_dir
+        )
         # Accept either <local_dir>/gesetze/<abk>.json or <local_dir>/<abk>.json
         if not gesetze_dir.is_dir():
             gesetze_dir = self.local_dir
@@ -76,7 +79,7 @@ class CorpusLoader:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 out[path.stem.lower()] = GesetzKorpus.model_validate(payload)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("Skipping malformed corpus file %s: %s", path, exc)
         if not out:
             raise CorpusUnavailableError(

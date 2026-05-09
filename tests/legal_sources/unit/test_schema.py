@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from kira.legal_sources.gesetze.schema import LookupNormInput
+from kira.legal_sources.gesetze.schema import (
+    LookupNormError,
+    LookupNormErrorCode,
+    LookupNormInput,
+    LookupNormResult,
+    LookupNormSuccess,
+)
 
 
 def test_minimal_input_validates():
@@ -38,14 +44,6 @@ def test_absatz_optional_and_validates():
         {"gesetz": "BGB", "paragraph": "535", "absatz": "1"}
     )
     assert payload.absatz == "1"
-
-
-from kira.legal_sources.gesetze.schema import (
-    LookupNormError,
-    LookupNormErrorCode,
-    LookupNormResult,
-    LookupNormSuccess,
-)
 
 
 def test_success_serializes_with_all_fields():

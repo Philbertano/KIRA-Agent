@@ -7,7 +7,6 @@ import pytest
 import respx
 from moto import mock_aws
 
-
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 

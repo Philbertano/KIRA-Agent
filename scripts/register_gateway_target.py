@@ -17,7 +17,6 @@ import sys
 
 import boto3
 
-
 SCHEMA = {
     "type": "object",
     "properties": {

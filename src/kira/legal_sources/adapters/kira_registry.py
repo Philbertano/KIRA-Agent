@@ -17,7 +17,6 @@ from kira.legal_sources._common.s3_corpus import CorpusLoader
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import LookupNormInput
 
-
 _DESCRIPTION = (
     "Lädt den autoritativen Wortlaut eines deutschen Paragraphen aus "
     "gesetze-im-internet.de (via S3-gepflegtem Korpus). Eingaben: "
