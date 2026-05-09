@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import boto3
@@ -17,6 +18,11 @@ import botocore.exceptions
 import httpx
 
 from kira.knowledge.ingest import GESETZE, GesetzKonfiguration
+from kira.legal_sources._common.region import REQUIRED_REGION
+
+# Pattern matching the leading "(N)" or "(Na)" Absatz marker that
+# kira.knowledge.xml_parser preserves in each <P> element.
+_ABSATZ_PREFIX = re.compile(r"^\(\s*(\d+[a-zA-Z]?)\s*\)\s*(.*)$", re.DOTALL)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -27,36 +33,36 @@ USER_AGENT = "KIRA-Agent/0.1 (legal-sources ingest; eu-central-1)"
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     bucket = os.environ["LEGAL_CORPUS_BUCKET"]
     requested = event.get("gesetze") or list(GESETZE.keys())
-    s3 = boto3.client("s3", region_name="eu-central-1")
+    s3 = boto3.client("s3", region_name=REQUIRED_REGION)
     written: list[str] = []
     skipped: list[str] = []
 
-    for key in requested:
-        cfg: GesetzKonfiguration | None = GESETZE.get(key.lower())
-        if cfg is None:
-            log.warning("Unknown Gesetz %s — skipped", key)
-            continue
-        with httpx.Client(
-            timeout=httpx.Timeout(60.0, connect=10.0),
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as client:
+    with httpx.Client(
+        timeout=httpx.Timeout(60.0, connect=10.0),
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+    ) as client:
+        for key in requested:
+            cfg: GesetzKonfiguration | None = GESETZE.get(key.lower())
+            if cfg is None:
+                log.warning("Unknown Gesetz %s — skipped", key)
+                continue
             payload = _build_payload(client, cfg)
-        body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        new_sha = hashlib.sha256(body).hexdigest()
-        s3_key = f"gesetze/{cfg.abkuerzung.lower()}.json"
-        existing_sha = _existing_sha(s3, bucket, s3_key)
-        if existing_sha == new_sha:
-            skipped.append(cfg.abkuerzung.lower())
-            continue
-        s3.put_object(
-            Bucket=bucket,
-            Key=s3_key,
-            Body=body,
-            ContentType="application/json",
-            Metadata={"content-sha256": new_sha},
-        )
-        written.append(cfg.abkuerzung.lower())
+            body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            new_sha = hashlib.sha256(body).hexdigest()
+            s3_key = f"gesetze/{cfg.abkuerzung.lower()}.json"
+            existing_sha = _existing_sha(s3, bucket, s3_key)
+            if existing_sha == new_sha:
+                skipped.append(cfg.abkuerzung.lower())
+                continue
+            s3.put_object(
+                Bucket=bucket,
+                Key=s3_key,
+                Body=body,
+                ContentType="application/json",
+                Metadata={"content-sha256": new_sha},
+            )
+            written.append(cfg.abkuerzung.lower())
 
     _write_manifest(s3, bucket)
     return {"written": written, "skipped": skipped}
@@ -71,7 +77,6 @@ def _build_payload(client: httpx.Client, cfg: GesetzKonfiguration) -> dict[str, 
     from datetime import date
 
     from kira.knowledge.ingest import _extract_xml_from_zip
-    from kira.knowledge.schema import norm_to_dict
     from kira.knowledge.xml_parser import filter_normen, parse_gii_xml
 
     response = client.get(cfg.zip_url)
@@ -102,15 +107,38 @@ def _build_payload(client: httpx.Client, cfg: GesetzKonfiguration) -> dict[str, 
             "anzahl_normen": len(filtered),
         },
         "paragraphen": {
-            p: {**norm_to_dict(n), "quelle_url": f"{cfg.base_url}/__{p}.html"}
+            p: _norm_to_corpus_format(p, n, f"{cfg.base_url}/__{p}.html")
             for p, n in sorted(filtered.items(), key=_sort_key)
         },
     }
 
 
-def _sort_key(item: tuple[str, object]) -> tuple[int, str]:
-    import re
+def _norm_to_corpus_format(
+    paragraph: str, norm: Any, quelle_url: str
+) -> dict[str, Any]:
+    """Convert a kira.knowledge `Norm` into the legal_sources corpus_format shape.
 
+    The on-disk JSON expected by `kira.legal_sources.gesetze.corpus_format` requires
+    each Absatz as `{"nummer": str, "text": str}`. The xml_parser produces
+    `list[str]` where each entry is the raw `<P>` text, typically prefixed with
+    `(N)`. This converter parses that prefix.
+    """
+    return {
+        "paragraph": paragraph,
+        "titel": norm.titel,
+        "absaetze": [_split_absatz(s) for s in norm.absaetze],
+        "quelle_url": quelle_url,
+    }
+
+
+def _split_absatz(raw: str) -> dict[str, str]:
+    match = _ABSATZ_PREFIX.match(raw)
+    if match:
+        return {"nummer": match.group(1), "text": match.group(2).strip()}
+    return {"nummer": "", "text": raw.strip()}
+
+
+def _sort_key(item: tuple[str, object]) -> tuple[int, str]:
     p = item[0]
     m = re.match(r"^(\d+)([a-zA-Z]?)$", p)
     if not m:

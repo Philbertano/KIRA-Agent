@@ -67,3 +67,49 @@ def test_ingest_skips_put_when_hash_unchanged(monkeypatch, s3_target):
     assert first["written"] == ["bgb"]
     assert second["written"] == []  # idempotent skip
     assert second["skipped"] == ["bgb"]
+
+
+def test_ingest_output_round_trips_through_corpus_format(monkeypatch, s3_target):
+    """End-to-end: ingest writes JSON that the lookup_norm path can actually read.
+
+    Without this test the adapter could write data the lookup Lambda silently
+    rejects with a ValidationError (which the loader skips via except), leaving
+    a deployed system that ingests but serves nothing.
+    """
+    from kira.legal_sources.gesetze.corpus_format import GesetzKorpus
+    from kira.legal_sources.gesetze.lookup_norm import lookup_norm
+    from kira.legal_sources.gesetze.schema import (
+        LookupNormInput,
+        LookupNormSuccess,
+    )
+
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_target)
+    zip_bytes = (FIXTURES / "captured" / "bgb.zip").read_bytes()
+
+    with respx.mock:
+        respx.get("https://www.gesetze-im-internet.de/bgb/xml.zip").mock(
+            return_value=httpx.Response(200, content=zip_bytes)
+        )
+        from kira.legal_sources.adapters.ingest_handler import handler
+        handler({"gesetze": ["bgb"]}, context=None)
+
+    s3 = boto3.client("s3", region_name="eu-central-1")
+    written = json.loads(
+        s3.get_object(Bucket=s3_target, Key="gesetze/bgb.json")["Body"].read()
+    )
+    # Strict parse: this must validate cleanly against the corpus_format
+    # contract that lookup_norm reads from.
+    korpus = GesetzKorpus.model_validate(written)
+    assert "535" in korpus.paragraphen
+    norm = korpus.paragraphen["535"]
+    assert norm.absaetze, "Norm should have at least one Absatz parsed"
+    assert norm.absaetze[0].nummer == "1"
+    assert "Mietvertrag" in norm.absaetze[0].text
+
+    # And the actual lookup_norm function returns a success.
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535"),
+        corpus={"bgb": korpus},
+    )
+    assert isinstance(result, LookupNormSuccess)
+    assert "Mietvertrag" in result.wortlaut

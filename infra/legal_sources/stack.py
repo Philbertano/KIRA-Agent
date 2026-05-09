@@ -113,9 +113,17 @@ class LegalSourcesStack(cdk.Stack):
             "DailyIngest",
             rule_name="kira-legal-ingest-daily",
             schedule=events.Schedule.cron(minute="0", hour="2"),
-            targets=[targets.LambdaFunction(ingest_fn)],
+            targets=[
+                targets.LambdaFunction(
+                    ingest_fn,
+                    retry_attempts=2,
+                ),
+            ],
         )
 
+        # CloudWatch supports periods up to 1 day (86400s); 36h is rejected.
+        # Equivalent semantics: sum invocations over the last two 24h windows
+        # and alarm if either window has zero invocations.
         cw.Alarm(
             self,
             "StaleCorpusAlarm",
@@ -124,14 +132,15 @@ class LegalSourcesStack(cdk.Stack):
                 namespace="AWS/Lambda",
                 metric_name="Invocations",
                 dimensions_map={"FunctionName": ingest_fn.function_name},
-                period=cdk.Duration.hours(36),
+                period=cdk.Duration.hours(24),
                 statistic="Sum",
             ),
             threshold=1,
-            evaluation_periods=1,
+            evaluation_periods=2,
+            datapoints_to_alarm=2,
             comparison_operator=cw.ComparisonOperator.LESS_THAN_THRESHOLD,
             treat_missing_data=cw.TreatMissingData.BREACHING,
-            alarm_description="Ingest has not run in 36h — corpus may be stale.",
+            alarm_description="Ingest has not run in 48h — corpus may be stale.",
         )
 
         cdk.CfnOutput(self, "LookupFnArn", value=lookup_fn.function_arn)

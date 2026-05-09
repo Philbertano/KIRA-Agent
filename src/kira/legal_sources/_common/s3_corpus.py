@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
+from kira.legal_sources._common.region import REQUIRED_REGION
 from kira.legal_sources.gesetze.corpus_format import GesetzKorpus
 
 log = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ class CorpusLoader:
         import boto3  # local import; lambda cold-start sensitive
         from botocore.exceptions import ClientError
 
-        s3 = boto3.client("s3", region_name="eu-central-1")
+        s3 = boto3.client("s3", region_name=REQUIRED_REGION)
         now = time.time()
         if (now - self._manifest_checked_at) < MANIFEST_RECHECK_SECONDS and self._cache:
             return dict(self._cache)

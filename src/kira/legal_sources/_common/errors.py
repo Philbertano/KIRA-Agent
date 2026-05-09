@@ -7,11 +7,10 @@ class ToolError(Exception):
     code: str = "tool_error"
 
     def __init__(self, message: str, *, code: str | None = None) -> None:
+        # If `code` is provided explicitly, override the class attribute on
+        # this instance; otherwise the subclass's class-level `code` wins.
         if code is not None:
             self.code = code
-        else:
-            # allow subclass to set as class attr
-            pass
         self.message = message
         super().__init__(f"{self.code}: {message}")
 

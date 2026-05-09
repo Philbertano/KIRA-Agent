@@ -22,6 +22,14 @@ from kira.legal_sources._common.s3_corpus import CorpusLoader
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import LookupNormInput
 
+TOOL_DESCRIPTION = (
+    "Lädt den autoritativen Wortlaut eines deutschen Paragraphen aus "
+    "gesetze-im-internet.de (via S3-gepflegtem Korpus). Eingaben: "
+    "gesetz (z.B. 'BGB'), paragraph (z.B. '535' oder '535a'), "
+    "absatz (optional, z.B. '1'). NUR autoritative Quellen — keine "
+    "Aggregatoren, keine ausländischen Quellen."
+)
+
 
 def make_lookup_norm_tool_function(
     *, loader: CorpusLoader | None = None,
@@ -48,7 +56,7 @@ def make_sdk_tool(*, loader: CorpusLoader | None = None):
 
     fn = make_lookup_norm_tool_function(loader=loader)
     schema = LookupNormInput.model_json_schema()
-    return tool("lookup_norm", "…", schema)(fn)
+    return tool("lookup_norm", TOOL_DESCRIPTION, schema)(fn)
 
 
 def _text(text: str) -> dict[str, Any]:
