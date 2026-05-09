@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "abkuerzung": "BGB",
+    "titel": "Bürgerliches Gesetzbuch",
+    "stand": "2026-05-08",
+    "quelle": "gesetze-im-internet.de",
+    "quelle_url": "https://www.gesetze-im-internet.de/bgb",
+    "gefiltert_auf": ["§§ 535–540"],
+    "anzahl_normen": 2
+  },
+  "paragraphen": {
+    "535": {
+      "paragraph": "535",
+      "titel": "Inhalt und Hauptpflichten des Mietvertrags",
+      "absaetze": [
+        {"nummer": "1", "text": "Durch den Mietvertrag wird der Vermieter verpflichtet, dem Mieter den Gebrauch der Mietsache zu gewähren."},
+        {"nummer": "2", "text": "Der Vermieter hat die Mietsache in einem zum vertragsgemäßen Gebrauch geeigneten Zustand zu erhalten."}
+      ],
+      "quelle_url": "https://www.gesetze-im-internet.de/bgb/__535.html"
+    },
+    "535a": {
+      "paragraph": "535a",
+      "titel": "Beispielhafte Suffix-Norm",
+      "absaetze": [
+        {"nummer": "1", "text": "Suffix-Test."}
+      ],
+      "quelle_url": "https://www.gesetze-im-internet.de/bgb/__535a.html"
+    }
+  }
+}
