@@ -84,7 +84,48 @@ class CorpusLoader:
             )
         return out
 
-    # --- S3 (stub; implemented in next task) ---
+    # --- S3 ---
 
     def _load_s3(self) -> dict[str, GesetzKorpus]:
-        raise CorpusUnavailableError("S3 branch not yet implemented")
+        import boto3  # local import; lambda cold-start sensitive
+        from botocore.exceptions import ClientError
+
+        s3 = boto3.client("s3", region_name="eu-central-1")
+        now = time.time()
+        if (now - self._manifest_checked_at) < MANIFEST_RECHECK_SECONDS and self._cache:
+            return dict(self._cache)
+        try:
+            head = s3.head_object(Bucket=self.s3_bucket, Key=MANIFEST_KEY)
+        except ClientError as exc:
+            raise CorpusUnavailableError(
+                f"Manifest read failed for s3://{self.s3_bucket}/{MANIFEST_KEY}: {exc}"
+            ) from exc
+        etag = head.get("ETag")
+        self._manifest_checked_at = now
+        if etag == self._manifest_etag and self._cache:
+            return dict(self._cache)
+        # Manifest changed (or first load) — re-read all listed files.
+        manifest_obj = s3.get_object(Bucket=self.s3_bucket, Key=MANIFEST_KEY)
+        manifest: dict[str, Any] = json.loads(manifest_obj["Body"].read())
+        TMP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        out: dict[str, GesetzKorpus] = {}
+        for key in manifest.get("files", []):
+            try:
+                obj = s3.get_object(Bucket=self.s3_bucket, Key=key)
+                payload = json.loads(obj["Body"].read())
+                korpus = GesetzKorpus.model_validate(payload)
+                # cache to /tmp for observability/debug
+                stem = Path(key).stem.lower()
+                (TMP_CACHE_DIR / f"{stem}.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+                out[stem] = korpus
+            except (ClientError, ValueError) as exc:
+                log.warning("Skipping bad S3 corpus file %s: %s", key, exc)
+        if not out:
+            raise CorpusUnavailableError(
+                f"No usable corpus files behind manifest in s3://{self.s3_bucket}"
+            )
+        self._cache = out
+        self._manifest_etag = etag
+        return dict(out)
