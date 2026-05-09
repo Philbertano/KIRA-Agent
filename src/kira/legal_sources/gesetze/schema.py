@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from enum import Enum
+from typing import Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -33,3 +35,50 @@ class LookupNormInput(BaseModel):
                 f"Paragraph muss Format '<zahl>[<buchstabe>]' haben, war: {v!r}"
             )
         return v
+
+
+class LookupNormErrorCode(str, Enum):
+    UNKNOWN_GESETZ = "unknown_gesetz"
+    PARAGRAPH_NOT_FOUND = "paragraph_not_found"
+    ABSATZ_NOT_FOUND = "absatz_not_found"
+    CORPUS_UNAVAILABLE = "corpus_unavailable"
+    VALIDATION_ERROR = "validation_error"
+
+
+class LookupNormSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gesetz: str
+    gesetz_titel: str
+    paragraph: str
+    absatz: str | None
+    titel: str
+    wortlaut: str
+    stand: str
+    quelle_url: str
+    stand_warnung: str | None
+
+    def to_agent_text(self) -> str:
+        warn = f"\n\n⚠️ {self.stand_warnung}" if self.stand_warnung else ""
+        absatz = f", Absatz {self.absatz}" if self.absatz else ""
+        return (
+            f"# {self.gesetz_titel} § {self.paragraph}{absatz} — {self.titel}\n\n"
+            f"{self.wortlaut}\n\n"
+            f"_Quelle: {self.quelle_url} | Stand: {self.stand}_{warn}"
+        )
+
+
+class LookupNormError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: LookupNormErrorCode
+    message: str
+    gesetz: str | None = None
+    paragraph: str | None = None
+    absatz: str | None = None
+
+    def to_agent_text(self) -> str:
+        return f"FEHLER ({self.error.value}): {self.message}"
+
+
+LookupNormResult = Union[LookupNormSuccess, LookupNormError]
