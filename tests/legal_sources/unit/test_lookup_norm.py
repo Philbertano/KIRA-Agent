@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -77,3 +78,28 @@ def test_absatz_not_in_norm_returns_error(bgb_korpus):
     assert isinstance(result, LookupNormError)
     assert result.error == LookupNormErrorCode.ABSATZ_NOT_FOUND
     assert result.absatz == "9"
+
+
+def test_stand_warning_set_when_corpus_older_than_30_days(bgb_korpus):
+    inp = LookupNormInput(gesetz="BGB", paragraph="535")
+    # fixture stand is 2026-05-08; pretend today is 60 days later.
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus}, today=date(2026, 7, 7))
+    assert isinstance(result, LookupNormSuccess)
+    assert result.stand_warnung is not None
+    assert "60 Tage alt" in result.stand_warnung
+
+
+def test_stand_warning_absent_when_recent(bgb_korpus):
+    inp = LookupNormInput(gesetz="BGB", paragraph="535")
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus}, today=date(2026, 5, 10))
+    assert isinstance(result, LookupNormSuccess)
+    assert result.stand_warnung is None
+
+
+def test_unparseable_stand_emits_warning(bgb_korpus):
+    bgb_korpus.meta.stand = "not-a-date"
+    inp = LookupNormInput(gesetz="BGB", paragraph="535")
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+    assert isinstance(result, LookupNormSuccess)
+    assert result.stand_warnung is not None
+    assert "unleserlich" in result.stand_warnung
