@@ -16,18 +16,30 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest tests/                   # full suite (~56 tests)
 .venv/bin/python -m pytest tests/test_pseudonymizer.py -v   # one file
 .venv/bin/python -m pytest tests/test_tools.py::test_norm_lookup_bgb_535   # one test
+.venv/bin/python -m pytest --cov=kira tests/        # with coverage (pytest-cov is in [dev])
 
 # CLI (entry point: kira)
 .venv/bin/kira check-pseudonymisierung data/beispielsachverhalte/001_mietminderung_schimmel.md
 .venv/bin/kira demo                                 # runs the example case end-to-end
 .venv/bin/kira ask <sachverhalt.md> --frage "..."   # ad-hoc question
+.venv/bin/kira ask <…> --force-tier opus            # override routing (haiku|sonnet|opus); also on `demo`
 .venv/bin/kira ingest [bgb betrkv heizkostenv]      # refresh law corpus from gesetze-im-internet.de
 
 # lint
 .venv/bin/ruff check src/ tests/
 ```
 
+## Environment
+
 `AWS_REGION` defaults to `eu-central-1`. Standard AWS credential resolution applies (`~/.aws/credentials`, `AWS_PROFILE`, env vars). The Bedrock client refuses to start in non-EU regions.
+
+Other knobs (see `.env.example`):
+
+- `KIRA_DEFAULT_MODEL` — default tier when the router has no opinion (`haiku|sonnet|opus`).
+- `KIRA_LOG_LEVEL` — standard logging level.
+- `KIRA_PSEUDONYM_KEY_PATH` — path to the encryption key for the mapping store (real-name ↔ placeholder). If the file is missing it gets generated; losing it makes existing mappings unrecoverable.
+- `KIRA_CACHE_DIR` — overrides `./data/cache/` (used by `urteil_fetch`).
+- `KIRA_ALLOW_DIRECT_API=1` — opt-in to the `anthropic_direct` backend; only for synthetic-data testing (see "LLM client abstraction" below).
 
 ## Architecture
 
@@ -42,9 +54,11 @@ The agent runs a **manual tool-use loop** (in `agent/core.py`) — not the highe
 
 In `pseudonymizer/pipeline.py`, **PII patterns (email/IBAN/phone/address) must run before party-name substitution** — otherwise names get replaced inside email addresses (`klaus.mueller@example.de` → `klaus.[MIETER_1]@example.de`). This bit us once; the test `test_email_replacement` enforces the order.
 
+Parties are declared in YAML front-matter at the top of each Sachverhalt markdown file (fields: `name`, `role` ∈ {`MIETER`, `VERMIETER`, `MITMIETER`, `BUERGE`, …}, `gender` ∈ {`m`,`w`,`d`,`u`}, `kind` ∈ {`nat`,`jur`}, optional `age_band`, optional `aliases[]`). The structured placeholders preserve exactly those attributes — anything outside this schema is by design invisible to the model.
+
 ### Model router
 
-`router/rule_based.py::route()` classifies the query via keyword match into a `TaskType`, then maps to `ModelTier` via `router/policy.py::POLICY`. Tiers are abstract (HAIKU/SONNET/OPUS); concrete model IDs live in `llm/models.py::MODEL_IDS` per backend. The router auto-escalates SONNET→OPUS for long/multi-clause queries (heuristic in `_complexity_signal`). `force_tier` always wins. There's also a Haiku-based classifier fallback in `router/classifier.py` that is **not yet wired into the main route()** — it's available but only called when explicitly invoked.
+`router/rule_based.py::route()` classifies the query via keyword match into a `TaskType`, then maps to `ModelTier` via `router/policy.py::POLICY`. Tiers are abstract (HAIKU/SONNET/OPUS); concrete model IDs live in `llm/models.py::MODEL_IDS` per backend. The router auto-escalates SONNET→OPUS for long/multi-clause queries (heuristic in `_complexity_signal`). `force_tier` always wins. There's also a Haiku-based classifier fallback in `router/classifier.py` that is **not yet wired into the main route()** — it's available but only called when explicitly invoked. If you do wire it in, it must run **after** pseudonymization, not before — the classifier is itself an LLM call and must never see clear PII.
 
 ### Knowledge / law corpus
 
@@ -79,9 +93,24 @@ When adding a new tool, register it via `register(Tool(...))` and import the mod
 
 The prompt also enforces structured output sections (Sachverhalt / Rechtliche Einschätzung / Belegte Quellen / Offene Punkte / Empfehlung) and tells the model to keep the structured placeholders intact (don't try to guess real names).
 
+## Reusable legal-sources tools (in progress, V1)
+
+A new module `src/kira/legal_sources/` is being built to host **reusable, framework-free** tools that query official German legal sources. They are intended for reuse across multiple future legal-domain agents and for deployment as **Lambda targets behind AWS Bedrock AgentCore Gateway in `eu-central-1`** — not just for KIRA's manual loop.
+
+Hard rules for this module (and its tests):
+
+- **No `kira.*` imports** inside `src/kira/legal_sources/` or `tests/legal_sources/`. The module must be extractable into a standalone package (`de-legal-sources`) with `git mv` once a second consumer exists. Allowed deps: stdlib, `pydantic`, `httpx`, `boto3`, `beautifulsoup4`/`lxml` for parsers.
+- **Three adapters live alongside, never inside the module proper**: (1) KIRA `Tool` registry adapter, (2) Claude Agent SDK `@tool` adapter, (3) AWS Lambda handler — the canonical deployment shape.
+- **Region pinned to `eu-central-1`** for every AWS resource (S3, Lambda, EventBridge, Gateway target). The existing `bedrock_eu` policy in `llm/client.py` already enforces this for Bedrock; the legal-sources module mirrors it for everything else.
+- **PII boundary**: pseudonymization stays inside the agent process. The legal-sources tools only ever receive structured legal references (`§`-numbers, Aktenzeichen, Gericht) — never client text. Tool input schemas reject free-text fields that could leak.
+
+V1 scope is **Tool 1 only — `lookup_norm`** against gesetze-im-internet.de. Tool 2 (`fetch_urteil` against rechtsprechung-im-internet.de, with an S3 Vectors index for future semantic search) is **explicitly deferred** until Tool 1 is fully deployed to AWS and validated against all test tiers. Do not start Tool 2 work without re-confirmation.
+
+The current design spec lives at `docs/superpowers/specs/2026-05-09-legal-sources-tool1-design.md`.
+
 ## Conventions
 
 - Code, docstrings, comments and user-facing text are in **German** (matches the legal domain). Tests, however, use English-style identifiers.
 - Tests for the pseudonymizer are the most safety-critical — if they go red, do not weaken assertions to make them pass; investigate. A pseudonymizer regression risks leaking client data to the cloud.
-- Develop on branch `claude/rental-law-ai-agent-IzzsZ`. Don't push elsewhere without explicit instruction.
-- Pyright/mypy are not currently wired up; ruff is.
+- Never push to `main` without explicit instruction; ask before creating new remote branches.
+- Only ruff is enforced (rules `E,F,I,B,UP,SIM,RUF`, line-length 100, target `py311` — see `pyproject.toml`). `mypy` is installed in `[dev]` but has no project config; treat type errors as advisory unless the user wires it up.
