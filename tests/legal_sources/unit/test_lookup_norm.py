@@ -53,3 +53,27 @@ def test_paragraph_with_letter_suffix_supported(bgb_korpus):
     assert isinstance(result, LookupNormSuccess)
     assert result.paragraph == "535a"
     assert "Suffix-Test." in result.wortlaut
+
+
+def test_unknown_gesetz_returns_error(bgb_korpus):
+    inp = LookupNormInput(gesetz="ABC", paragraph="1")
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+    assert isinstance(result, LookupNormError)
+    assert result.error == LookupNormErrorCode.UNKNOWN_GESETZ
+    assert result.gesetz == "ABC"
+
+
+def test_paragraph_not_in_corpus_returns_error(bgb_korpus):
+    inp = LookupNormInput(gesetz="BGB", paragraph="1")
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+    assert isinstance(result, LookupNormError)
+    assert result.error == LookupNormErrorCode.PARAGRAPH_NOT_FOUND
+    assert "§§ 535–540" in result.message  # range from fixture meta
+
+
+def test_absatz_not_in_norm_returns_error(bgb_korpus):
+    inp = LookupNormInput(gesetz="BGB", paragraph="535", absatz="9")
+    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+    assert isinstance(result, LookupNormError)
+    assert result.error == LookupNormErrorCode.ABSATZ_NOT_FOUND
+    assert result.absatz == "9"
