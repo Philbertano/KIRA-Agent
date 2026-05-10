@@ -106,19 +106,20 @@ class LegalSourcesStack(cdk.Stack):
         kms_key.grant_decrypt(lookup_fn)
 
         # Cloudflare Worker proxy URL — public, hardcoded here for visibility.
-        # The auth secret lives in SecretsManager (populated out-of-band).
         proxy_url = (
             "https://kira-legaltext-gii-proxy.philip-trempler.workers.dev"
         )
-        proxy_secret = secretsmanager.Secret(
+        # Reference an EXISTING SecretsManager secret. Pre-create it via:
+        #   aws secretsmanager create-secret \
+        #     --region eu-central-1 \
+        #     --name kira-legal/juris-proxy-auth \
+        #     --secret-string '<the-value>'
+        # This decouples secret lifecycle from stack lifecycle: rotate the
+        # secret value without redeploying CFN.
+        proxy_secret = secretsmanager.Secret.from_secret_name_v2(
             self,
             "JurisProxySecret",
-            secret_name="kira-legal/juris-proxy-auth",
-            description=(
-                "Shared bearer for the Cloudflare Worker that proxies "
-                "gesetze-im-internet.de. Populate the SecretString manually "
-                "(or via wrangler secret) — CDK never sees the value."
-            ),
+            "kira-legal/juris-proxy-auth",
         )
 
         ingest_environment = {

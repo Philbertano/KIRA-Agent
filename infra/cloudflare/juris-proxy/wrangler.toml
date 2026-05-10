@@ -1,0 +1,8 @@
+name = "kira-legaltext-gii-proxy"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+# PROXY_SECRET is set out-of-band via:
+#   wrangler secret put PROXY_SECRET
+# The secret value must match the AWS SecretsManager secret
+# `kira-legal/juris-proxy-auth` consumed by the kira-legal-ingest Lambda.

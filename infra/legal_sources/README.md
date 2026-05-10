@@ -21,38 +21,59 @@ cdk deploy KiraLegalSources --require-approval never
 
 Outputs include `LookupFnArn` and `BucketName`.
 
+## Cloudflare Worker proxy (one-time setup)
+
+`gesetze-im-internet.de` (juris.de edge) blocks AWS IP ranges, so the ingest
+Lambda cannot fetch upstream directly. We route through a Cloudflare Worker
+whose egress IPs are not on the blocklist. The Worker source lives in
+`infra/cloudflare/juris-proxy/worker.js` (deploy via the Cloudflare dashboard
+or `wrangler deploy`).
+
+**Worker setup:**
+1. Set the Worker secret in the Cloudflare dashboard:
+   `kira-legaltext-gii-proxy → Settings → Variables and Secrets → Add Secret`
+   - Name: `PROXY_SECRET`
+   - Value: a random ~32-char string (e.g., `openssl rand -hex 32`)
+
+**AWS-side setup (mirror the same secret):**
+```bash
+aws secretsmanager create-secret \
+  --region eu-central-1 \
+  --name kira-legal/juris-proxy-auth \
+  --description "Bearer for kira-legaltext-gii-proxy Cloudflare Worker" \
+  --secret-string "$YOUR_RANDOM_VALUE"
+```
+
+The CDK stack references this existing secret via `from_secret_name_v2`.
+Rotate by `aws secretsmanager put-secret-value` + a `cdk deploy` (Lambda
+env var resolves at deploy time).
+
 ## Initial corpus population
 
-> ⚠️ **Upstream network constraint.** `gesetze-im-internet.de` (juris.de edge)
-> blocks AWS IP ranges. The ingest Lambda **cannot** reach upstream from
-> inside `eu-central-1`. The EventBridge daily schedule is left in place but
-> currently fails harmlessly (the stale-corpus alarm will fire after 48h).
->
-> Run the ingest **locally** (your residential ISP) to populate S3:
+```bash
+aws lambda invoke \
+  --function-name kira-legal-ingest \
+  --region eu-central-1 \
+  --payload '{}' \
+  --cli-binary-format raw-in-base64-out \
+  /tmp/ingest-out.json
+cat /tmp/ingest-out.json
+# Expect: {"written": ["bgb", "betrkv", "heizkostenv"], "skipped": []}
+```
+
+The EventBridge rule runs this daily at 02:00 UTC. Subsequent invocations
+hash-skip unchanged content (`{"written": [], "skipped": ["bgb", ...]}`).
+
+The same `handler()` function also runs locally without the proxy when
+`LEGAL_INGEST_PROXY_URL` is unset — useful for ad-hoc dev refresh:
 
 ```bash
-# from repo root, with .venv active and AWS creds set
 LEGAL_CORPUS_BUCKET=kira-legal-corpus-${AWS_ACCOUNT_ID}-eu-central-1 \
   .venv/bin/python -c "
 from kira.legal_sources.adapters.ingest_handler import handler
 import json
 print(json.dumps(handler({}, None), indent=2))
 "
-# Expect: {"written": ["bgb", "betrkv", "heizkostenv"], "skipped": []}
-```
-
-The same `handler()` function runs locally or in Lambda — the only difference
-is the network path. Once you have a non-AWS ingest host (developer laptop,
-GitHub Actions runner, residential VPS), point its scheduler at this command.
-
-If you ever solve the upstream block (egress proxy, etc.), the deployed
-Lambda is already wired up — just invoke it as the deploy README originally
-described:
-
-```bash
-aws lambda invoke \
-  --function-name kira-legal-ingest --region eu-central-1 \
-  --payload '{}' --cli-binary-format raw-in-base64-out /tmp/ingest-out.json
 ```
 
 ## Register Gateway target
