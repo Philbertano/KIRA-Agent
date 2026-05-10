@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 import botocore.exceptions
@@ -29,6 +30,13 @@ log.setLevel(logging.INFO)
 
 USER_AGENT = "KIRA-Agent/0.1 (legal-sources ingest; eu-central-1)"
 
+# When set, all upstream fetches go through this Cloudflare Worker proxy.
+# The Worker is expected to accept ?url=<encoded_target_url> and stream the
+# upstream response body unchanged. See infra/cloudflare/juris-proxy/.
+ENV_PROXY_URL = "LEGAL_INGEST_PROXY_URL"
+ENV_PROXY_AUTH_HEADER = "LEGAL_INGEST_PROXY_AUTH_HEADER"  # default: X-Proxy-Auth
+ENV_PROXY_AUTH_VALUE = "LEGAL_INGEST_PROXY_AUTH_VALUE"
+
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     bucket = os.environ["LEGAL_CORPUS_BUCKET"]
@@ -37,9 +45,11 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     written: list[str] = []
     skipped: list[str] = []
 
+    proxy_headers = _proxy_auth_headers()
+
     with httpx.Client(
         timeout=httpx.Timeout(60.0, connect=10.0),
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": USER_AGENT, **proxy_headers},
         follow_redirects=True,
     ) as client:
         for key in requested:
@@ -79,7 +89,8 @@ def _build_payload(client: httpx.Client, cfg: GesetzKonfiguration) -> dict[str, 
     from kira.knowledge.ingest import _extract_xml_from_zip
     from kira.knowledge.xml_parser import filter_normen, parse_gii_xml
 
-    response = client.get(cfg.zip_url)
+    fetch_url = _via_proxy(cfg.zip_url)
+    response = client.get(fetch_url)
     response.raise_for_status()
     xml_bytes = _extract_xml_from_zip(response.content)
     parsed = parse_gii_xml(xml_bytes)
@@ -136,6 +147,32 @@ def _split_absatz(raw: str) -> dict[str, str]:
     if match:
         return {"nummer": match.group(1), "text": match.group(2).strip()}
     return {"nummer": "", "text": raw.strip()}
+
+
+def _via_proxy(direct_url: str) -> str:
+    """Wrap an upstream URL with the configured Cloudflare Worker proxy.
+
+    Returns `direct_url` unchanged when LEGAL_INGEST_PROXY_URL is unset, so
+    local development against a residential ISP keeps working without a
+    proxy round-trip.
+    """
+    proxy = os.environ.get(ENV_PROXY_URL)
+    if not proxy:
+        return direct_url
+    return f"{proxy.rstrip('/')}/?url={quote(direct_url, safe='')}"
+
+
+def _proxy_auth_headers() -> dict[str, str]:
+    """Header dict to attach the proxy's shared-secret bearer.
+
+    Returns an empty dict if no auth value is configured. Header name
+    defaults to X-Proxy-Auth, overridable via LEGAL_INGEST_PROXY_AUTH_HEADER.
+    """
+    value = os.environ.get(ENV_PROXY_AUTH_VALUE)
+    if not value:
+        return {}
+    name = os.environ.get(ENV_PROXY_AUTH_HEADER) or "X-Proxy-Auth"
+    return {name: value}
 
 
 def _sort_key(item: tuple[str, object]) -> tuple[int, str]:

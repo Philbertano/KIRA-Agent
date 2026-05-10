@@ -29,6 +29,9 @@ from aws_cdk import (
 from aws_cdk import (
     aws_s3 as s3,
 )
+from aws_cdk import (
+    aws_secretsmanager as secretsmanager,
+)
 from constructs import Construct
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +105,36 @@ class LegalSourcesStack(cdk.Stack):
         bucket.grant_read(lookup_fn)
         kms_key.grant_decrypt(lookup_fn)
 
+        # Cloudflare Worker proxy URL — public, hardcoded here for visibility.
+        # The auth secret lives in SecretsManager (populated out-of-band).
+        proxy_url = (
+            "https://kira-legaltext-gii-proxy.philip-trempler.workers.dev"
+        )
+        proxy_secret = secretsmanager.Secret(
+            self,
+            "JurisProxySecret",
+            secret_name="kira-legal/juris-proxy-auth",
+            description=(
+                "Shared bearer for the Cloudflare Worker that proxies "
+                "gesetze-im-internet.de. Populate the SecretString manually "
+                "(or via wrangler secret) — CDK never sees the value."
+            ),
+        )
+
+        ingest_environment = {
+            "LEGAL_CORPUS_BUCKET": bucket.bucket_name,
+            "LEGAL_INGEST_PROXY_URL": proxy_url,
+            # The CFN template stores a `{{resolve:secretsmanager:...}}`
+            # dynamic reference, not the literal secret. CloudFormation
+            # resolves it at deploy time and writes the value into the
+            # Lambda's environment configuration. Anyone with
+            # lambda:GetFunctionConfiguration on this function can read the
+            # plaintext secret — acceptable here because the secret only
+            # rate-limits an open Cloudflare Worker proxying public legal
+            # text, not a high-value auth boundary.
+            "LEGAL_INGEST_PROXY_AUTH_VALUE": proxy_secret.secret_value.unsafe_unwrap(),
+        }
+
         ingest_fn = lambda_.Function(
             self,
             "IngestFn",
@@ -112,7 +145,7 @@ class LegalSourcesStack(cdk.Stack):
             code=code,
             memory_size=1024,
             timeout=cdk.Duration.minutes(5),
-            environment={"LEGAL_CORPUS_BUCKET": bucket.bucket_name},
+            environment=ingest_environment,
             log_retention=logs.RetentionDays.ONE_MONTH,
         )
         bucket.grant_read_write(ingest_fn)
