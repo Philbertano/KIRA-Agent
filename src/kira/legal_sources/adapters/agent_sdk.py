@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
-from kira.legal_sources._common.s3_corpus import CorpusLoader
+from kira.legal_sources._common.s3_corpus import LazyCorpusLoader
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import LookupNormInput
 
@@ -32,9 +32,9 @@ TOOL_DESCRIPTION = (
 
 
 def make_lookup_norm_tool_function(
-    *, loader: CorpusLoader | None = None,
+    *, loader: LazyCorpusLoader | None = None,
 ) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
-    loader = loader or CorpusLoader.from_env()
+    loader = loader or LazyCorpusLoader.from_env()
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -42,15 +42,19 @@ def make_lookup_norm_tool_function(
         except ValidationError as exc:
             return _text(f"validation_error: {exc}")
         try:
-            corpus = loader.load_all()
+            result = lookup_norm(
+                payload,
+                load_meta=loader.load_meta,
+                load_norm=lambda abk, key: loader.load_norm(key),
+            )
         except CorpusUnavailableError as exc:
             return _text(f"corpus_unavailable: {exc}")
-        return _text(lookup_norm(payload, corpus=corpus).to_agent_text())
+        return _text(result.to_agent_text())
 
     return _impl
 
 
-def make_sdk_tool(*, loader: CorpusLoader | None = None):
+def make_sdk_tool(*, loader: LazyCorpusLoader | None = None):
     """Optional: wrap the function with claude_agent_sdk's @tool decorator."""
     from claude_agent_sdk import tool  # local import; SDK is optional dep
 
