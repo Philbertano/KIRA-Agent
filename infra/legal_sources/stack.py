@@ -210,8 +210,8 @@ class LegalSourcesStack(cdk.Stack):
             vector_bucket_name="kira-legal-norms",
             index_name="kira-legal-norms",
             dimension=1024,
-            distance_metric="COSINE",
-            data_type="FLOAT32",
+            distance_metric="cosine",
+            data_type="float32",
         )
         vector_index.add_dependency(vector_bucket)
 
