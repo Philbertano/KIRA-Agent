@@ -65,3 +65,25 @@ def make_sdk_tool(*, loader: LazyCorpusLoader | None = None):
 
 def _text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
+from kira.legal_sources._common.vector_index import VectorIndex
+from kira.legal_sources.gesetze.schema import SearchNormInput
+from kira.legal_sources.gesetze.search_norm import search_norm
+
+
+def make_search_norm_tool_function(
+    *,
+    embedder: CohereMultilingualEmbedder,
+    index: VectorIndex,
+) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
+    async def _impl(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            payload = SearchNormInput.model_validate(args)
+        except ValidationError as exc:
+            return _text(f"validation_error: {exc}")
+        result = search_norm(payload, embed=embedder.embed_query, search=index.query)
+        return _text(result.to_agent_text())
+
+    return _impl

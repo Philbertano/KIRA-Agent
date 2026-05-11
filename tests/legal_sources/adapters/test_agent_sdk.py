@@ -90,3 +90,23 @@ async def test_make_tool_function_returns_mcp_shape(tmp_path, monkeypatch):
     assert "content" in out
     assert out["content"][0]["type"] == "text"
     assert "Mietvertrag" in out["content"][0]["text"]
+
+
+from unittest.mock import MagicMock
+
+
+@pytest.mark.asyncio
+async def test_search_norm_tool_function_returns_mcp_shape():
+    from kira.legal_sources.adapters.agent_sdk import (
+        make_search_norm_tool_function,
+    )
+
+    embedder = MagicMock()
+    embedder.embed_query.return_value = [0.0] * 1024
+    index = MagicMock()
+    index.query.return_value = []
+
+    fn = make_search_norm_tool_function(embedder=embedder, index=index)
+    out = await fn({"query": "Mietminderung"})
+    assert "content" in out
+    assert out["content"][0]["type"] == "text"
