@@ -102,9 +102,13 @@ class SearchNormInput(BaseModel):
     @field_validator("gesetz_filter")
     @classmethod
     def _normalize_gesetz_filter(cls, v: list[str] | None) -> list[str] | None:
+        # German legal abbreviations are uppercase by convention, and the
+        # ingest pipeline stores `abkuerzung` uppercase in S3 Vectors
+        # metadata — so the filter must match that casing for the
+        # `{"$in": [...]}` clause to hit.
         if v is None:
             return None
-        return [s.strip().lower() for s in v]
+        return [s.strip().upper() for s in v]
 
 
 class SearchNormHit(BaseModel):

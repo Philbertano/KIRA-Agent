@@ -78,7 +78,7 @@ def test_gesetz_filter_translates_to_metadata_filter():
     )
     search_norm(inp, embed=embed, search=search)
     assert calls["search_kwargs"]["metadata_filter"] == {
-        "abkuerzung": {"$in": ["bgb", "weg"]},
+        "abkuerzung": {"$in": ["BGB", "WEG"]},
     }
 
 
@@ -92,7 +92,7 @@ def test_combined_filters_translate_correctly():
     search_norm(inp, embed=embed, search=search)
     f = calls["search_kwargs"]["metadata_filter"]
     assert f == {
-        "abkuerzung": {"$in": ["bgb"]},
+        "abkuerzung": {"$in": ["BGB"]},
         "type": {"$in": ["Gesetz"]},
     }
 

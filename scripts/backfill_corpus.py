@@ -205,7 +205,7 @@ def _process_one(
     embed_md: dict[str, dict[str, Any]] = {}
     type_str = "Verordnung" if "verord" in title.lower() else "Gesetz"
 
-    for paragraph, norm in parsed.items():
+    for paragraph, norm in parsed.normen.items():
         payload = {
             "gesetz": abk,
             "paragraph": paragraph,

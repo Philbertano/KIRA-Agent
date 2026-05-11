@@ -108,6 +108,6 @@ def test_search_handler_passes_gesetz_filter():
 
     kwargs = mock_index.query.call_args.kwargs
     assert kwargs["metadata_filter"] == {
-        "abkuerzung": {"$in": ["bgb"]},
+        "abkuerzung": {"$in": ["BGB"]},
         "type": {"$in": ["Gesetz"]},
     }

@@ -138,11 +138,11 @@ def test_search_input_extra_field_rejected():
         SearchNormInput.model_validate({"query": "x", "rogue": True})
 
 
-def test_search_input_filters_normalize_lowercase():
+def test_search_input_filters_normalize_uppercase():
     inp = SearchNormInput.model_validate(
         {"query": "x", "gesetz_filter": ["BGB", "weg"]}
     )
-    assert inp.gesetz_filter == ["bgb", "weg"]
+    assert inp.gesetz_filter == ["BGB", "WEG"]
 
 
 def test_search_input_type_filter_validates_enum():
