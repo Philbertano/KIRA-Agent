@@ -6,216 +6,178 @@ import pytest
 from moto import mock_aws
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
-from kira.legal_sources._common.s3_corpus import CorpusLoader
+from kira.legal_sources._common.s3_corpus import LazyCorpusLoader
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 @pytest.fixture(autouse=True)
-def _clear_env(monkeypatch):
-    monkeypatch.delenv("LEGAL_CORPUS_LOCAL_DIR", raising=False)
-    monkeypatch.delenv("LEGAL_CORPUS_BUCKET", raising=False)
-
-
-def test_loads_from_local_dir(tmp_path: Path, monkeypatch):
-    src = json.loads((FIXTURES / "bgb_subset.json").read_text(encoding="utf-8"))
-    target = tmp_path / "gesetze"
-    target.mkdir()
-    (target / "bgb.json").write_text(json.dumps(src), encoding="utf-8")
-    monkeypatch.setenv("LEGAL_CORPUS_LOCAL_DIR", str(tmp_path))
-
-    loader = CorpusLoader.from_env()
-    corpus = loader.load_all()
-
-    assert "bgb" in corpus
-    assert corpus["bgb"].meta.abkuerzung == "BGB"
-
-
-def test_local_dir_missing_raises_corpus_unavailable(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEGAL_CORPUS_LOCAL_DIR", str(tmp_path / "does-not-exist"))
-    with pytest.raises(CorpusUnavailableError):
-        CorpusLoader.from_env().load_all()
-
-
-def test_no_env_set_raises_corpus_unavailable():
-    with pytest.raises(CorpusUnavailableError):
-        CorpusLoader.from_env().load_all()
-
-
-@pytest.fixture
 def aws_creds(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+    monkeypatch.delenv("LEGAL_CORPUS_LOCAL_DIR", raising=False)
+
+
+def _meta_payload() -> dict:
+    return {
+        "abkuerzung": "BGB",
+        "titel": "Bürgerliches Gesetzbuch",
+        "type": "Gesetz",
+        "stand": "2026-05-09",
+        "quelle": "gesetze-im-internet.de",
+        "quelle_url": "https://www.gesetze-im-internet.de/bgb",
+        "upstream_xml_zip_url": "https://www.gesetze-im-internet.de/bgb/xml.zip",
+        "paragraphen": {
+            "535": {
+                "titel": "Inhalt und Hauptpflichten des Mietvertrags",
+                "key": "gesetze/bgb/535.json",
+                "content_sha256": "abc",
+            }
+        },
+    }
+
+
+def _norm_payload() -> dict:
+    return {
+        "gesetz": "BGB",
+        "paragraph": "535",
+        "titel": "Inhalt und Hauptpflichten des Mietvertrags",
+        "absaetze": [{"nummer": "1", "text": "Durch den Mietvertrag ..."}],
+        "quelle_url": "https://www.gesetze-im-internet.de/bgb/__535.html",
+    }
+
+
+def _manifest_payload() -> dict:
+    return {
+        "version": 2,
+        "stand": "2026-05-09",
+        "gesetze": {
+            "bgb": {
+                "abkuerzung": "BGB",
+                "titel": "Bürgerliches Gesetzbuch",
+                "type": "Gesetz",
+                "meta_key": "gesetze/bgb/_meta.json",
+                "upstream_etag": "\"abc\"",
+                "upstream_last_modified": "Wed, 06 May 2026 15:45:05 GMT",
+            }
+        },
+    }
 
 
 @pytest.fixture
-def s3_corpus_bucket(aws_creds):
+def s3_corpus_bucket():
     with mock_aws():
         s3 = boto3.client("s3", region_name="eu-central-1")
         s3.create_bucket(
             Bucket="test-corpus",
             CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
         )
-        bgb = (FIXTURES / "bgb_subset.json").read_text(encoding="utf-8")
-        s3.put_object(
-            Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8")
-        )
-        manifest = json.dumps({"version": 1, "files": ["gesetze/bgb.json"]})
         s3.put_object(
             Bucket="test-corpus",
             Key="gesetze/_manifest.json",
-            Body=manifest.encode("utf-8"),
+            Body=json.dumps(_manifest_payload()).encode("utf-8"),
+        )
+        s3.put_object(
+            Bucket="test-corpus",
+            Key="gesetze/bgb/_meta.json",
+            Body=json.dumps(_meta_payload()).encode("utf-8"),
+        )
+        s3.put_object(
+            Bucket="test-corpus",
+            Key="gesetze/bgb/535.json",
+            Body=json.dumps(_norm_payload()).encode("utf-8"),
         )
         yield "test-corpus"
 
 
-def test_loads_from_s3(monkeypatch, s3_corpus_bucket, tmp_path):
+def test_load_manifest_returns_v2(monkeypatch, s3_corpus_bucket, tmp_path):
     monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
     monkeypatch.setattr(
         "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
         tmp_path / "cache",
     )
-    loader = CorpusLoader.from_env()
-    corpus = loader.load_all()
-    assert "bgb" in corpus
-    assert corpus["bgb"].meta.abkuerzung == "BGB"
+    loader = LazyCorpusLoader.from_env()
+    m = loader.load_manifest()
+    assert m.version == 2
+    assert "bgb" in m.gesetze
 
 
-def test_warm_cache_skips_s3_within_recheck_window(monkeypatch, s3_corpus_bucket, tmp_path):
+def test_load_meta_then_norm(monkeypatch, s3_corpus_bucket, tmp_path):
     monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
     monkeypatch.setattr(
         "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
         tmp_path / "cache",
     )
-    loader = CorpusLoader.from_env()
-    loader.load_all()  # populate the warm cache
-    # Mutate S3 to add a new gesetz; warm load must NOT see it.
+    loader = LazyCorpusLoader.from_env()
+    meta = loader.load_meta("bgb")
+    assert meta is not None
+    assert meta.abkuerzung == "BGB"
+    norm = loader.load_norm("gesetze/bgb/535.json")
+    assert norm is not None
+    assert "Mietvertrag" in norm.absaetze[0].text
+
+
+def test_load_meta_returns_none_for_unknown(
+    monkeypatch, s3_corpus_bucket, tmp_path
+):
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+        tmp_path / "cache",
+    )
+    loader = LazyCorpusLoader.from_env()
+    assert loader.load_meta("doesnotexist") is None
+
+
+def test_load_meta_warm_hit_skips_s3(monkeypatch, s3_corpus_bucket, tmp_path):
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+        tmp_path / "cache",
+    )
+    loader = LazyCorpusLoader.from_env()
+    loader.load_meta("bgb")  # cold
+    # Mutate S3 to a malformed payload; warm load must NOT fetch.
     s3 = boto3.client("s3", region_name="eu-central-1")
-    second_payload = json.dumps({
-        "_meta": {
-            "abkuerzung": "BetrKV", "titel": "x", "stand": "2026-05-09",
-            "quelle": "x", "quelle_url": "https://example.test",
-            "gefiltert_auf": [], "anzahl_normen": 0,
-        },
-        "paragraphen": {},
-    })
     s3.put_object(
         Bucket=s3_corpus_bucket,
-        Key="gesetze/betrkv.json",
-        Body=second_payload.encode("utf-8"),
+        Key="gesetze/bgb/_meta.json",
+        Body=b"not-json",
     )
-    second = loader.load_all()  # within recheck window
-    assert "betrkv" not in second
-    # Force recheck: backdate the manifest-checked-at timestamp
-    loader._manifest_checked_at = 0.0
-    new_manifest = json.dumps(
-        {"version": 2, "files": ["gesetze/bgb.json", "gesetze/betrkv.json"]}
+    again = loader.load_meta("bgb")  # warm — served from memory
+    assert again is not None and again.abkuerzung == "BGB"
+
+
+def test_load_norm_falls_back_to_tmp_after_memory_eviction(
+    monkeypatch, s3_corpus_bucket, tmp_path
+):
+    """After memory eviction, /tmp serves without re-hitting S3."""
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+        tmp_path / "cache",
     )
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.NORM_MEMORY_MAX_ITEMS", 1
+    )
+    loader = LazyCorpusLoader.from_env()
+    loader.load_norm("gesetze/bgb/535.json")  # cold path: S3 → /tmp → memory
+    # Force memory eviction by loading the same key under a different key
+    # → easier: directly reach in and clear the in-memory LRU.
+    loader._norm_memory._data.clear()
+    # Mutate S3 to garbage; if /tmp tier works, we still get the right norm.
+    s3 = boto3.client("s3", region_name="eu-central-1")
     s3.put_object(
         Bucket=s3_corpus_bucket,
-        Key="gesetze/_manifest.json",
-        Body=new_manifest.encode("utf-8"),
+        Key="gesetze/bgb/535.json",
+        Body=b"corrupt",
     )
-    third = loader.load_all()
-    assert "betrkv" in third
+    n = loader.load_norm("gesetze/bgb/535.json")
+    assert n is not None
+    assert "Mietvertrag" in n.absaetze[0].text
 
 
-def test_local_dir_with_malformed_json_skips_file(tmp_path, monkeypatch):
-    """Test that malformed JSON files are skipped with a warning."""
-    src = json.loads((FIXTURES / "bgb_subset.json").read_text(encoding="utf-8"))
-    target = tmp_path / "gesetze"
-    target.mkdir()
-    # Add a good file
-    (target / "bgb.json").write_text(json.dumps(src), encoding="utf-8")
-    # Add a malformed file
-    (target / "broken.json").write_text("{ invalid json }", encoding="utf-8")
-    monkeypatch.setenv("LEGAL_CORPUS_LOCAL_DIR", str(tmp_path))
-
-    loader = CorpusLoader.from_env()
-    corpus = loader.load_all()
-
-    # Should still load the good file and skip the broken one
-    assert "bgb" in corpus
-    assert "broken" not in corpus
-
-
-def test_s3_manifest_read_error_raises_corpus_unavailable(monkeypatch, aws_creds, tmp_path):
-    """Test that S3 manifest read error raises CorpusUnavailableError."""
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="eu-central-1")
-        s3.create_bucket(
-            Bucket="test-corpus",
-            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
-        )
-        # Bucket exists but manifest doesn't
-        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
-        monkeypatch.setattr(
-            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
-            tmp_path / "cache",
-        )
-        with pytest.raises(CorpusUnavailableError):
-            CorpusLoader.from_env().load_all()
-
-
-def test_s3_with_malformed_corpus_file_skips_it(monkeypatch, aws_creds, tmp_path):
-    """Test that malformed corpus files in S3 are skipped."""
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="eu-central-1")
-        s3.create_bucket(
-            Bucket="test-corpus",
-            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
-        )
-        # Add a broken file and a good file
-        bgb = (FIXTURES / "bgb_subset.json").read_text(encoding="utf-8")
-        s3.put_object(
-            Bucket="test-corpus", Key="gesetze/bgb.json", Body=bgb.encode("utf-8")
-        )
-        s3.put_object(
-            Bucket="test-corpus", Key="gesetze/broken.json", Body=b"{ invalid }"
-        )
-        manifest = json.dumps(
-            {"version": 1, "files": ["gesetze/bgb.json", "gesetze/broken.json"]}
-        )
-        s3.put_object(
-            Bucket="test-corpus",
-            Key="gesetze/_manifest.json",
-            Body=manifest.encode("utf-8"),
-        )
-
-        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
-        monkeypatch.setattr(
-            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
-            tmp_path / "cache",
-        )
-        loader = CorpusLoader.from_env()
-        corpus = loader.load_all()
-
-        # Should load bgb and skip the broken file
-        assert "bgb" in corpus
-        assert "broken" not in corpus
-
-
-def test_s3_empty_manifest_raises_corpus_unavailable(monkeypatch, aws_creds, tmp_path):
-    """Test that an S3 manifest with no usable files raises CorpusUnavailableError."""
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="eu-central-1")
-        s3.create_bucket(
-            Bucket="test-corpus",
-            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
-        )
-        # Empty manifest
-        manifest = json.dumps({"version": 1, "files": []})
-        s3.put_object(
-            Bucket="test-corpus",
-            Key="gesetze/_manifest.json",
-            Body=manifest.encode("utf-8"),
-        )
-
-        monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
-        monkeypatch.setattr(
-            "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
-            tmp_path / "cache",
-        )
-        with pytest.raises(CorpusUnavailableError):
-            CorpusLoader.from_env().load_all()
+def test_no_env_set_raises_corpus_unavailable():
+    with pytest.raises(CorpusUnavailableError):
+        LazyCorpusLoader.from_env().load_manifest()

@@ -1,12 +1,11 @@
-"""Corpus loader: serves a `dict[str, GesetzKorpus]` from S3 or a local dir.
+"""Lazy corpus loader: serves manifest, per-Gesetz meta, and per-§ norms.
 
-Resolution order:
-  1. If `LEGAL_CORPUS_LOCAL_DIR` is set, read every `<abk>.json` file from there.
-  2. Else if `LEGAL_CORPUS_BUCKET` is set, read from S3.
-  3. Else raise `CorpusUnavailableError`.
+Three-tier cache hierarchy per resource:
+  memory (MemoryLRU)  →  /tmp (TmpDiskLRU)  →  S3.
 
-S3 reads are cached in `/tmp` and re-validated against `_manifest.json`
-every `MANIFEST_RECHECK_SECONDS`.
+Manifest is a single object so it lives only in memory (with a 5-minute
+recheck window — see `MANIFEST_RECHECK_SECONDS`). Meta and Norm objects
+use both tiers.
 """
 
 from __future__ import annotations
@@ -15,121 +14,153 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
+from kira.legal_sources._common.lru import MemoryLRU, TmpDiskLRU
+from kira.legal_sources._common.manifest import Manifest, parse_manifest
 from kira.legal_sources._common.region import REQUIRED_REGION
-from kira.legal_sources.gesetze.corpus_format import GesetzKorpus
+from kira.legal_sources.gesetze.corpus_format import GesetzMeta, Norm
 
 log = logging.getLogger(__name__)
 
 ENV_LOCAL_DIR = "LEGAL_CORPUS_LOCAL_DIR"
 ENV_S3_BUCKET = "LEGAL_CORPUS_BUCKET"
+
 TMP_CACHE_DIR = Path("/tmp/legal_sources_corpus")
-MANIFEST_RECHECK_SECONDS = 300  # 5 minutes
 MANIFEST_KEY = "gesetze/_manifest.json"
+MANIFEST_RECHECK_SECONDS = 300
+
+META_MEMORY_MAX_ITEMS = 200
+NORM_MEMORY_MAX_ITEMS = 500
+TMP_BYTE_BUDGET = 800 * 1024 * 1024  # 800 MB
 
 
-@dataclass
-class CorpusLoader:
-    local_dir: Path | None = None
-    s3_bucket: str | None = None
-    _cache: dict[str, GesetzKorpus] = field(default_factory=dict)
-    _manifest_etag: str | None = None
-    _manifest_checked_at: float = 0.0
+class LazyCorpusLoader:
+    """Lazy three-tier loader. One instance per Lambda execution environment."""
+
+    def __init__(
+        self,
+        *,
+        s3_bucket: str | None,
+        local_dir: Path | None,
+    ) -> None:
+        self._s3_bucket = s3_bucket
+        self._local_dir = local_dir
+        self._manifest: Manifest | None = None
+        self._manifest_checked_at: float = 0.0
+        self._meta_memory: MemoryLRU[str, GesetzMeta] = MemoryLRU(
+            max_items=META_MEMORY_MAX_ITEMS
+        )
+        self._norm_memory: MemoryLRU[str, Norm] = MemoryLRU(
+            max_items=NORM_MEMORY_MAX_ITEMS
+        )
+        self._tmp = TmpDiskLRU(root=TMP_CACHE_DIR, max_bytes=TMP_BYTE_BUDGET)
 
     @classmethod
-    def from_env(cls) -> CorpusLoader:
+    def from_env(cls) -> "LazyCorpusLoader":
         local = os.environ.get(ENV_LOCAL_DIR)
         bucket = os.environ.get(ENV_S3_BUCKET)
         return cls(
-            local_dir=Path(local) if local else None,
             s3_bucket=bucket or None,
+            local_dir=Path(local) if local else None,
         )
 
-    def load_all(self) -> dict[str, GesetzKorpus]:
-        if self.local_dir is not None:
-            return self._load_local()
-        if self.s3_bucket is not None:
-            return self._load_s3()
+    # --- manifest ---
+
+    def load_manifest(self) -> Manifest:
+        now = time.time()
+        if (
+            self._manifest is not None
+            and (now - self._manifest_checked_at) < MANIFEST_RECHECK_SECONDS
+        ):
+            return self._manifest
+        raw = self._read_bytes(MANIFEST_KEY)
+        if raw is None:
+            raise CorpusUnavailableError(
+                f"manifest not found at {MANIFEST_KEY!r}"
+            )
+        self._manifest = parse_manifest(json.loads(raw))
+        self._manifest_checked_at = now
+        return self._manifest
+
+    # --- meta ---
+
+    def load_meta(self, abk: str) -> GesetzMeta | None:
+        cached = self._meta_memory.get(abk)
+        if cached is not None:
+            return cached
+        manifest = self.load_manifest()
+        entry = manifest.gesetze.get(abk)
+        if entry is None:
+            return None
+        raw = self._read_bytes(entry.meta_key)
+        if raw is None:
+            return None
+        meta = GesetzMeta.model_validate(json.loads(raw))
+        self._meta_memory.put(abk, meta)
+        return meta
+
+    # --- norm ---
+
+    def load_norm(self, key: str) -> Norm | None:
+        cached = self._norm_memory.get(key)
+        if cached is not None:
+            return cached
+        raw = self._read_bytes(key)
+        if raw is None:
+            return None
+        try:
+            norm = Norm.model_validate(json.loads(raw))
+        except (ValueError, json.JSONDecodeError) as exc:
+            log.warning("Skipping malformed norm %s: %s", key, exc)
+            return None
+        self._norm_memory.put(key, norm)
+        return norm
+
+    # --- backing reads ---
+
+    def _read_bytes(self, key: str) -> bytes | None:
+        if self._local_dir is not None:
+            return self._read_local(key)
+        if self._s3_bucket is not None:
+            return self._read_s3(key)
         raise CorpusUnavailableError(
             f"Neither {ENV_LOCAL_DIR} nor {ENV_S3_BUCKET} is set."
         )
 
-    # --- local ---
+    def _read_local(self, key: str) -> bytes | None:
+        # Treat the manifest specially: it sits at the local_dir root for
+        # backwards-compat with V1 fixtures, and per-§ keys land below.
+        candidate = self._local_dir / key
+        if candidate.exists():
+            return candidate.read_bytes()
+        # Try collapsing the leading 'gesetze/' (V1-style fixtures).
+        flat = self._local_dir / Path(key).name
+        if flat.exists():
+            return flat.read_bytes()
+        return None
 
-    def _load_local(self) -> dict[str, GesetzKorpus]:
-        gesetze_dir = (
-            self.local_dir / "gesetze"
-            if self.local_dir.name != "gesetze"
-            else self.local_dir
-        )
-        # Accept either <local_dir>/gesetze/<abk>.json or <local_dir>/<abk>.json
-        if not gesetze_dir.is_dir():
-            gesetze_dir = self.local_dir
-        if not gesetze_dir.is_dir():
-            raise CorpusUnavailableError(
-                f"Local corpus dir {self.local_dir!s} does not exist."
-            )
-        out: dict[str, GesetzKorpus] = {}
-        for path in sorted(gesetze_dir.glob("*.json")):
-            if path.name.startswith("_"):
-                continue
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                out[path.stem.lower()] = GesetzKorpus.model_validate(payload)
-            except Exception as exc:
-                log.warning("Skipping malformed corpus file %s: %s", path, exc)
-        if not out:
-            raise CorpusUnavailableError(
-                f"No usable corpus files found in {gesetze_dir!s}."
-            )
-        return out
-
-    # --- S3 ---
-
-    def _load_s3(self) -> dict[str, GesetzKorpus]:
-        import boto3  # local import; lambda cold-start sensitive
+    def _read_s3(self, key: str) -> bytes | None:
+        flat_key = key.replace("/", "__")
+        cached_disk = self._tmp.get(flat_key)
+        if cached_disk is not None:
+            return cached_disk
+        import boto3
         from botocore.exceptions import ClientError
 
         s3 = boto3.client("s3", region_name=REQUIRED_REGION)
-        now = time.time()
-        if (now - self._manifest_checked_at) < MANIFEST_RECHECK_SECONDS and self._cache:
-            return dict(self._cache)
         try:
-            head = s3.head_object(Bucket=self.s3_bucket, Key=MANIFEST_KEY)
+            obj = s3.get_object(Bucket=self._s3_bucket, Key=key)
         except ClientError as exc:
-            raise CorpusUnavailableError(
-                f"Manifest read failed for s3://{self.s3_bucket}/{MANIFEST_KEY}: {exc}"
-            ) from exc
-        etag = head.get("ETag")
-        self._manifest_checked_at = now
-        if etag == self._manifest_etag and self._cache:
-            return dict(self._cache)
-        # Manifest changed (or first load) — re-read all listed files.
-        manifest_obj = s3.get_object(Bucket=self.s3_bucket, Key=MANIFEST_KEY)
-        manifest: dict[str, Any] = json.loads(manifest_obj["Body"].read())
-        TMP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        out: dict[str, GesetzKorpus] = {}
-        for key in manifest.get("files", []):
-            try:
-                obj = s3.get_object(Bucket=self.s3_bucket, Key=key)
-                payload = json.loads(obj["Body"].read())
-                korpus = GesetzKorpus.model_validate(payload)
-                # cache to /tmp for observability/debug
-                stem = Path(key).stem.lower()
-                (TMP_CACHE_DIR / f"{stem}.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
-                out[stem] = korpus
-            except (ClientError, ValueError) as exc:
-                log.warning("Skipping bad S3 corpus file %s: %s", key, exc)
-        if not out:
-            raise CorpusUnavailableError(
-                f"No usable corpus files behind manifest in s3://{self.s3_bucket}"
-            )
-        self._cache = out
-        self._manifest_etag = etag
-        return dict(out)
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code in ("NoSuchKey", "404", "AccessDenied"):
+                return None
+            raise CorpusUnavailableError(f"S3 GET {key!r} failed: {exc}") from exc
+        body = obj["Body"].read()
+        try:
+            self._tmp.put(flat_key, body)
+        except OSError as exc:  # disk full / permission, etc.
+            log.warning("Could not write %s to /tmp: %s", flat_key, exc)
+        return body
