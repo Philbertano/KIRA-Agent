@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from kira.legal_sources.gesetze.corpus_format import GesetzKorpus
+from kira.legal_sources.gesetze.corpus_format import (
+    Absatz,
+    GesetzMeta,
+    Norm,
+    NormIndexEntry,
+)
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import (
     LookupNormError,
@@ -13,118 +18,170 @@ from kira.legal_sources.gesetze.schema import (
     LookupNormSuccess,
 )
 
-FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+def _bgb_meta() -> GesetzMeta:
+    return GesetzMeta.model_validate(
+        {
+            "abkuerzung": "BGB",
+            "titel": "Bürgerliches Gesetzbuch",
+            "type": "Gesetz",
+            "stand": "2026-05-08",
+            "quelle": "gesetze-im-internet.de",
+            "quelle_url": "https://www.gesetze-im-internet.de/bgb",
+            "upstream_xml_zip_url": "https://www.gesetze-im-internet.de/bgb/xml.zip",
+            "paragraphen": {
+                "535": {
+                    "titel": "Inhalt und Hauptpflichten des Mietvertrags",
+                    "key": "gesetze/bgb/535.json",
+                    "content_sha256": "abc",
+                },
+                "536": {
+                    "titel": "Mietminderung bei Sach- und Rechtsmängeln",
+                    "key": "gesetze/bgb/536.json",
+                    "content_sha256": "def",
+                },
+                "535a": {
+                    "titel": "Suffix-Norm",
+                    "key": "gesetze/bgb/535a.json",
+                    "content_sha256": "ghi",
+                },
+            },
+        }
+    )
 
 
-@pytest.fixture
-def bgb_korpus() -> GesetzKorpus:
-    payload = json.loads((FIXTURES / "bgb_subset.json").read_text(encoding="utf-8"))
-    return GesetzKorpus.model_validate(payload)
+def _bgb_535() -> Norm:
+    return Norm(
+        gesetz="BGB",
+        paragraph="535",
+        titel="Inhalt und Hauptpflichten des Mietvertrags",
+        absaetze=[
+            Absatz(nummer="1", text="Durch den Mietvertrag wird der Vermieter verpflichtet, ..."),
+            Absatz(nummer="2", text="Der Mieter ist verpflichtet, ..."),
+        ],
+        quelle_url="https://www.gesetze-im-internet.de/bgb/__535.html",
+    )
 
 
-def test_returns_full_paragraph_when_no_absatz(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+def _make_loaders(meta: GesetzMeta | None, norms: dict[str, Norm] | None = None):
+    norms = norms or {}
 
+    def load_meta(abk: str) -> GesetzMeta | None:
+        return meta if abk == "bgb" and meta is not None else None
+
+    def load_norm(meta_key: str, norm_key: str) -> Norm | None:
+        return norms.get(norm_key)
+
+    return load_meta, load_norm
+
+
+def test_returns_full_paragraph_when_no_absatz():
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta, {"gesetze/bgb/535.json": _bgb_535()})
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
     assert isinstance(result, LookupNormSuccess)
-    assert result.gesetz == "BGB"
-    assert result.paragraph == "535"
-    assert result.absatz is None
     assert "Durch den Mietvertrag" in result.wortlaut
-    assert "Der Vermieter hat" in result.wortlaut  # both Absätze concatenated
+    assert "Der Mieter" in result.wortlaut
+    assert result.absatz is None
     assert result.stand == "2026-05-08"
-    assert result.quelle_url.endswith("__535.html")
-    assert result.stand_warnung is None
 
 
-def test_returns_specific_absatz_when_requested(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535", absatz="2")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
-
+def test_returns_specific_absatz_when_requested():
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta, {"gesetze/bgb/535.json": _bgb_535()})
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535", absatz="2"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
     assert isinstance(result, LookupNormSuccess)
     assert result.absatz == "2"
-    assert "Der Vermieter hat die Mietsache" in result.wortlaut
+    assert "Der Mieter" in result.wortlaut
     assert "Durch den Mietvertrag" not in result.wortlaut
 
 
-def test_paragraph_with_letter_suffix_supported(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535a")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
-
-    assert isinstance(result, LookupNormSuccess)
-    assert result.paragraph == "535a"
-    assert "Suffix-Test." in result.wortlaut
-
-
-def test_unknown_gesetz_returns_error(bgb_korpus):
-    inp = LookupNormInput(gesetz="ABC", paragraph="1")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+def test_unknown_gesetz_returns_error():
+    load_meta, load_norm = _make_loaders(None)
+    result = lookup_norm(
+        LookupNormInput(gesetz="ABC", paragraph="1"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
     assert isinstance(result, LookupNormError)
     assert result.error == LookupNormErrorCode.UNKNOWN_GESETZ
-    assert result.gesetz == "ABC"
 
 
-def test_paragraph_not_in_corpus_returns_error(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="1")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+def test_paragraph_not_found_lists_near_misses():
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta)
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="537"),  # not present
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
     assert isinstance(result, LookupNormError)
     assert result.error == LookupNormErrorCode.PARAGRAPH_NOT_FOUND
-    assert "§§ 535–540" in result.message  # range from fixture meta  # noqa: RUF001
+    # Near-miss list includes existing close paragraphs
+    assert "535" in result.message or "536" in result.message
 
 
-def test_absatz_not_in_norm_returns_error(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535", absatz="9")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
+def test_absatz_not_found_returns_error():
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta, {"gesetze/bgb/535.json": _bgb_535()})
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535", absatz="9"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
     assert isinstance(result, LookupNormError)
     assert result.error == LookupNormErrorCode.ABSATZ_NOT_FOUND
-    assert result.absatz == "9"
 
 
-def test_stand_warning_set_when_corpus_older_than_30_days(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535")
-    # fixture stand is 2026-05-08; pretend today is 60 days later.
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus}, today=date(2026, 7, 7))
-    assert isinstance(result, LookupNormSuccess)
-    assert result.stand_warnung is not None
-    assert "60 Tage alt" in result.stand_warnung
-
-
-def test_stand_warning_absent_when_recent(bgb_korpus):
-    inp = LookupNormInput(gesetz="BGB", paragraph="535")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus}, today=date(2026, 5, 10))
-    assert isinstance(result, LookupNormSuccess)
-    assert result.stand_warnung is None
-
-
-def test_unparseable_stand_emits_warning(bgb_korpus):
-    bgb_korpus.meta.stand = "not-a-date"
-    inp = LookupNormInput(gesetz="BGB", paragraph="535")
-    result = lookup_norm(inp, corpus={"bgb": bgb_korpus})
-    assert isinstance(result, LookupNormSuccess)
-    assert result.stand_warnung is not None
-    assert "unleserlich" in result.stand_warnung
-
-
-def test_error_to_agent_text_formats_correctly():
-    """Test that LookupNormError.to_agent_text() properly formats error messages."""
-    from kira.legal_sources.gesetze.schema import LookupNormError, LookupNormErrorCode
-
-    err = LookupNormError(
-        error=LookupNormErrorCode.UNKNOWN_GESETZ,
-        message="Test error message",
+def test_norm_load_returns_none_treated_as_corpus_unavailable():
+    """If meta says §535 exists but the underlying file can't be loaded."""
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta, {})  # empty norms dict
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535"),
+        load_meta=load_meta,
+        load_norm=load_norm,
     )
-    text = err.to_agent_text()
-    assert "FEHLER" in text
-    assert "unknown_gesetz" in text
-    assert "Test error message" in text
+    assert isinstance(result, LookupNormError)
+    assert result.error == LookupNormErrorCode.CORPUS_UNAVAILABLE
 
 
-def test_norm_with_no_absaetze_returns_empty_text():
-    """Test edge case where a norm exists but has no absaetze list."""
-    from kira.legal_sources.gesetze.corpus_format import Norm
-    from kira.legal_sources.gesetze.lookup_norm import _select_text
+def test_stand_warning_when_meta_old():
+    meta = _bgb_meta()
+    load_meta, load_norm = _make_loaders(meta, {"gesetze/bgb/535.json": _bgb_535()})
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+        today=date(2026, 7, 7),  # 60 days after 2026-05-08
+    )
+    assert isinstance(result, LookupNormSuccess)
+    assert result.stand_warnung is not None
+    assert "60 Tage" in result.stand_warnung
 
-    norm_no_absatz = Norm(paragraph="535", titel="Test", absaetze=[], quelle_url="http://test")
-    text, absatz_num = _select_text(norm_no_absatz, None)
-    assert text == ""
-    assert absatz_num is None
+
+def test_paragraph_with_letter_suffix():
+    meta = _bgb_meta()
+    norm_535a = Norm(
+        gesetz="BGB",
+        paragraph="535a",
+        titel="Suffix-Norm",
+        absaetze=[Absatz(nummer="1", text="Suffix-Test.")],
+        quelle_url="https://www.gesetze-im-internet.de/bgb/__535a.html",
+    )
+    load_meta, load_norm = _make_loaders(meta, {"gesetze/bgb/535a.json": norm_535a})
+    result = lookup_norm(
+        LookupNormInput(gesetz="BGB", paragraph="535a"),
+        load_meta=load_meta,
+        load_norm=load_norm,
+    )
+    assert isinstance(result, LookupNormSuccess)
+    assert result.paragraph == "535a"

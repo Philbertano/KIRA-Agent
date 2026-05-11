@@ -1,11 +1,11 @@
-"""Pure function: resolve a single paragraph from an in-memory corpus."""
+"""Pure function: resolve a single paragraph via injected loaders."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import date, datetime, timedelta
+from typing import Callable
 
-from kira.legal_sources.gesetze.corpus_format import GesetzKorpus, Norm
+from kira.legal_sources.gesetze.corpus_format import GesetzMeta, Norm
 from kira.legal_sources.gesetze.schema import (
     LookupNormError,
     LookupNormErrorCode,
@@ -15,40 +15,51 @@ from kira.legal_sources.gesetze.schema import (
 )
 
 _STAND_WARN_AGE = timedelta(days=30)
+_NEAR_MISS_K = 5
+
+LoadMetaFn = Callable[[str], GesetzMeta | None]
+LoadNormFn = Callable[[str, str], Norm | None]
 
 
 def lookup_norm(
     input_data: LookupNormInput,
     *,
-    corpus: Mapping[str, GesetzKorpus],
+    load_meta: LoadMetaFn,
+    load_norm: LoadNormFn,
     today: date | None = None,
 ) -> LookupNormResult:
-    """Resolve `input_data` against the in-memory `corpus`.
-
-    `corpus` is a mapping of lower-case Gesetz-Abkürzung → parsed `GesetzKorpus`.
-    `today` is injectable for deterministic stand-warning tests.
-    """
     today = today or date.today()
     abk = input_data.gesetz  # already lower-case after validation
-    korpus = corpus.get(abk)
-    if korpus is None:
+
+    meta = load_meta(abk)
+    if meta is None:
         return LookupNormError(
             error=LookupNormErrorCode.UNKNOWN_GESETZ,
-            message=f"Gesetz {abk.upper()!r} ist nicht im Korpus geladen.",
+            message=f"Gesetz {abk.upper()!r} ist nicht im Korpus.",
             gesetz=abk.upper(),
             paragraph=input_data.paragraph,
             absatz=input_data.absatz,
         )
 
-    norm = korpus.paragraphen.get(input_data.paragraph)
-    if norm is None:
+    entry = meta.paragraphen.get(input_data.paragraph)
+    if entry is None:
         return LookupNormError(
             error=LookupNormErrorCode.PARAGRAPH_NOT_FOUND,
             message=(
-                f"§ {input_data.paragraph} {abk.upper()} ist nicht im kuratierten Korpus "
-                f"({', '.join(korpus.meta.gefiltert_auf) or 'leer'})."
+                f"§ {input_data.paragraph} {meta.abkuerzung} ist nicht im Korpus. "
+                f"Nahe Treffer: {', '.join(_near_misses(input_data.paragraph, meta))}."
             ),
-            gesetz=abk.upper(),
+            gesetz=meta.abkuerzung,
+            paragraph=input_data.paragraph,
+            absatz=input_data.absatz,
+        )
+
+    norm = load_norm(entry.key.split("/")[-2], entry.key)
+    if norm is None:
+        return LookupNormError(
+            error=LookupNormErrorCode.CORPUS_UNAVAILABLE,
+            message=f"Konnte {entry.key} nicht laden.",
+            gesetz=meta.abkuerzung,
             paragraph=input_data.paragraph,
             absatz=input_data.absatz,
         )
@@ -59,23 +70,23 @@ def lookup_norm(
             error=LookupNormErrorCode.ABSATZ_NOT_FOUND,
             message=(
                 f"Absatz {input_data.absatz} in § {input_data.paragraph} "
-                f"{abk.upper()} existiert nicht."
+                f"{meta.abkuerzung} existiert nicht."
             ),
-            gesetz=abk.upper(),
+            gesetz=meta.abkuerzung,
             paragraph=input_data.paragraph,
             absatz=input_data.absatz,
         )
 
     return LookupNormSuccess(
-        gesetz=korpus.meta.abkuerzung,
-        gesetz_titel=korpus.meta.titel,
+        gesetz=meta.abkuerzung,
+        gesetz_titel=meta.titel,
         paragraph=norm.paragraph,
         absatz=used_absatz,
         titel=norm.titel,
         wortlaut=wortlaut,
-        stand=korpus.meta.stand,
-        quelle_url=norm.quelle_url or korpus.meta.quelle_url,
-        stand_warnung=_stand_warning(korpus.meta.stand, today),
+        stand=meta.stand,
+        quelle_url=norm.quelle_url or meta.quelle_url,
+        stand_warnung=_stand_warning(meta.stand, today),
     )
 
 
@@ -83,8 +94,7 @@ def _select_text(norm: Norm, absatz: str | None) -> tuple[str, str | None]:
     if absatz is None:
         if not norm.absaetze:
             return ("", None)
-        joined = "\n\n".join(f"({a.nummer}) {a.text}" for a in norm.absaetze)
-        return (joined, None)
+        return ("\n\n".join(f"({a.nummer}) {a.text}" for a in norm.absaetze), None)
     for a in norm.absaetze:
         if a.nummer == absatz:
             return (f"({a.nummer}) {a.text}", a.nummer)
@@ -95,11 +105,27 @@ def _stand_warning(stand: str, today: date) -> str | None:
     try:
         stand_date = datetime.strptime(stand, "%Y-%m-%d").date()
     except ValueError:
-        return f"Stand-Datum {stand!r} ist unleserlich — Korpus prüfen."
+        return f"Stand-Datum {stand!r} ist unleserlich."
     age = today - stand_date
     if age > _STAND_WARN_AGE:
-        return (
-            f"Korpus-Stand ist {age.days} Tage alt (Schwelle: {_STAND_WARN_AGE.days} Tage). "
-            f"Manuell verifizieren oder Ingest erneut ausführen."
-        )
+        return f"Korpus-Stand ist {age.days} Tage alt — bitte verifizieren."
     return None
+
+
+def _near_misses(target: str, meta: GesetzMeta) -> list[str]:
+    """Return up to _NEAR_MISS_K paragraph keys numerically/lexically closest to target."""
+    keys = list(meta.paragraphen.keys())
+    target_num = _to_sort_key(target)
+    keys.sort(key=lambda k: abs(_to_sort_key(k) - target_num))
+    return keys[:_NEAR_MISS_K]
+
+
+def _to_sort_key(p: str) -> float:
+    """Coerce '535', '535a', '535b' into sortable numbers (suffix as 0.01-step)."""
+    import re
+    m = re.match(r"^(\d+)([a-zA-Z]?)$", p)
+    if not m:
+        return 0.0
+    num = int(m.group(1))
+    suffix = m.group(2)
+    return num + (ord(suffix.lower()) - ord("a") + 1) * 0.01 if suffix else float(num)
