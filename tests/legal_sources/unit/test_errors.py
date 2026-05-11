@@ -15,3 +15,10 @@ def test_corpus_unavailable_is_tool_error():
     assert err.code == "corpus_unavailable"
     with pytest.raises(ToolError):
         raise err
+
+
+def test_embedding_unavailable_is_tool_error():
+    from kira.legal_sources._common.errors import EmbeddingUnavailableError, ToolError
+    err = EmbeddingUnavailableError("bedrock down")
+    assert isinstance(err, ToolError)
+    assert err.code == "embedding_unavailable"
