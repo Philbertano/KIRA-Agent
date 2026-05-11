@@ -12,7 +12,11 @@ from kira.legal_sources._common.errors import EmbeddingUnavailableError
 EMBEDDING_DIMENSION = 1024
 MODEL_ID = "cohere.embed-multilingual-v3"
 DEFAULT_BATCH_SIZE = 96
-DEFAULT_MAX_CHARS = 6000
+# Cohere on Bedrock enforces maxLength: 2048 characters per input text.
+# (This is documented as a Bedrock-specific limit; the standalone Cohere
+# API uses a token-based limit instead.) Setting slightly below to leave
+# margin for the citation-prefix overhead at the call sites.
+DEFAULT_MAX_CHARS = 2000
 
 
 class CohereMultilingualEmbedder:
