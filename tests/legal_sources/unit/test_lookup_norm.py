@@ -180,3 +180,26 @@ def test_paragraph_with_letter_suffix():
     )
     assert isinstance(result, LookupNormSuccess)
     assert result.paragraph == "535a"
+
+
+def test_select_text_with_no_absaetze_and_none_requested():
+    """_select_text with empty absaetze list and absatz=None returns ('', None)."""
+    from kira.legal_sources.gesetze.lookup_norm import _select_text
+    norm = Norm(
+        gesetz="BGB",
+        paragraph="999",
+        titel="Empty Norm",
+        absaetze=[],
+        quelle_url="https://example.test",
+    )
+    wortlaut, used_absatz = _select_text(norm, None)
+    assert wortlaut == ""
+    assert used_absatz is None
+
+
+def test_to_sort_key_with_malformed_paragraph():
+    """_to_sort_key returns 0.0 for malformed paragraph strings."""
+    from kira.legal_sources.gesetze.lookup_norm import _to_sort_key
+    assert _to_sort_key("abc") == 0.0
+    assert _to_sort_key("§535") == 0.0
+    assert _to_sort_key("") == 0.0

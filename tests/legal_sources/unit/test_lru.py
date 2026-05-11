@@ -98,3 +98,22 @@ def test_disk_lru_rejects_keys_with_path_separators(tmp_path: Path):
         cache.put("../escape.json", b"x")
     with pytest.raises(ValueError):
         cache.put("a/b.json", b"x")
+
+
+def test_disk_lru_scan_existing_populates_sizes(tmp_path: Path):
+    """TmpDiskLRU._scan_existing() populates _sizes with existing files on init."""
+    # Create files before initializing cache
+    (tmp_path / "a.json").write_bytes(b"x" * 30)
+    (tmp_path / "b.json").write_bytes(b"y" * 50)
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=1000)
+    # Sizes dict should reflect existing files
+    assert cache.bytes_used == 80
+    assert cache.get("a.json") == b"x" * 30
+    assert cache.get("b.json") == b"y" * 50
+
+
+def test_disk_lru_validate_key_rejects_backslash(tmp_path: Path):
+    """_validate_key raises ValueError when key contains backslash."""
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=100)
+    with pytest.raises(ValueError):
+        cache.put("a\\b.json", b"x")

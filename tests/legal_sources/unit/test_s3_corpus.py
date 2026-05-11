@@ -181,3 +181,67 @@ def test_load_norm_falls_back_to_tmp_after_memory_eviction(
 def test_no_env_set_raises_corpus_unavailable():
     with pytest.raises(CorpusUnavailableError):
         LazyCorpusLoader.from_env().load_manifest()
+
+
+def test_load_manifest_warm_hit_skips_s3(monkeypatch, s3_corpus_bucket, tmp_path):
+    """Second call to load_manifest within recheck window returns cached."""
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_corpus_bucket)
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+        tmp_path / "cache",
+    )
+    loader = LazyCorpusLoader.from_env()
+    m1 = loader.load_manifest()
+    # Mutate S3 to malformed; warm load must NOT fetch.
+    s3 = boto3.client("s3", region_name="eu-central-1")
+    s3.put_object(
+        Bucket=s3_corpus_bucket,
+        Key="gesetze/_manifest.json",
+        Body=b"not-json",
+    )
+    m2 = loader.load_manifest()  # warm hit, served from memory
+    assert m2.version == 2
+    assert m1.version == m2.version
+
+
+def test_read_local_flat_fallback(monkeypatch, tmp_path):
+    """_read_local falls back to flat filename when key has 'gesetze/' prefix."""
+    monkeypatch.delenv("LEGAL_CORPUS_BUCKET", raising=False)
+    local_dir = tmp_path / "corpus"
+    local_dir.mkdir()
+    # Write a flat file without gesetze/ subdir (V1-style)
+    (local_dir / "535.json").write_bytes(b'{"test": "data"}')
+    loader = LazyCorpusLoader(s3_bucket=None, local_dir=local_dir)
+    # Request with gesetze/ prefix, should find flat 535.json
+    result = loader._read_local("gesetze/bgb/535.json")
+    assert result == b'{"test": "data"}'
+
+
+def test_read_s3_client_error_non_suppressed(monkeypatch, tmp_path):
+    """S3 ClientError with non-suppressed code raises CorpusUnavailableError."""
+    from unittest.mock import MagicMock, patch
+
+    from botocore.exceptions import ClientError
+
+    monkeypatch.delenv("LEGAL_CORPUS_LOCAL_DIR", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", "test-corpus")
+    monkeypatch.setattr(
+        "kira.legal_sources._common.s3_corpus.TMP_CACHE_DIR",
+        tmp_path / "cache",
+    )
+
+    loader = LazyCorpusLoader.from_env()
+    error_response = {
+        "Error": {"Code": "InternalError", "Message": "Server error"}
+    }
+    # Mock boto3.client to return a mock client that raises ClientError
+    mock_s3_client = MagicMock()
+    mock_s3_client.get_object.side_effect = ClientError(error_response, "GetObject")
+
+    with patch("boto3.client", return_value=mock_s3_client):
+        with pytest.raises(CorpusUnavailableError) as exc_info:
+            loader._read_s3("gesetze/bgb/535.json")
+        assert "S3 GET" in str(exc_info.value)

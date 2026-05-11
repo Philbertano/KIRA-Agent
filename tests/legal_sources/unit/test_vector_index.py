@@ -114,3 +114,11 @@ def test_query_client_error_raises_corpus_unavailable():
     idx = VectorIndex(s3vectors_client=client, index_name="x")
     with pytest.raises(CorpusUnavailableError):
         idx.query(vector=[0.0] * 1024, k=1)
+
+
+def test_delete_empty_is_noop():
+    """VectorIndex.delete([]) is a no-op and doesn't call client."""
+    client = MagicMock()
+    idx = VectorIndex(s3vectors_client=client, index_name="x")
+    idx.delete([])
+    assert client.delete_vectors.call_count == 0

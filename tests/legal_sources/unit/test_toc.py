@@ -85,3 +85,53 @@ def test_fetch_toc_directly_when_no_proxy(monkeypatch):
         with httpx.Client() as client:
             entries = fetch_toc(client)
     assert len(entries) == 6
+
+
+def test_parse_toc_skips_missing_title_element():
+    """parse_toc skips items with missing title or link element."""
+    xml = b"""<?xml version="1.0"?>
+    <root>
+        <item>
+            <title>BGB</title>
+            <link>https://example.test/bgb/xml.zip</link>
+        </item>
+        <item>
+            <title>Missing Link</title>
+        </item>
+        <item>
+            <link>https://example.test/weg/xml.zip</link>
+        </item>
+    </root>"""
+    entries = parse_toc(xml)
+    assert len(entries) == 1
+    assert entries[0].title == "BGB"
+
+
+def test_parse_toc_skips_empty_title_and_link():
+    """parse_toc skips items where title or link becomes empty after strip."""
+    xml = b"""<?xml version="1.0"?>
+    <root>
+        <item>
+            <title>   </title>
+            <link>https://example.test/bgb/xml.zip</link>
+        </item>
+        <item>
+            <title>WEG</title>
+            <link>   </link>
+        </item>
+        <item>
+            <title>BGB</title>
+            <link>https://example.test/bgb/xml.zip</link>
+        </item>
+    </root>"""
+    entries = parse_toc(xml)
+    assert len(entries) == 1
+    assert entries[0].title == "BGB"
+
+
+def test_is_citable_rejects_außer_kraft_by_title():
+    """is_citable rejects entries with '(außer Kraft)' in title."""
+    assert not is_citable(TocEntry(
+        title="Beispielgesetz (außer Kraft)",
+        link="https://www.gesetze-im-internet.de/beispiel/xml.zip",
+    ))
