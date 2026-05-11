@@ -48,3 +48,56 @@ def test_memory_lru_size_reflects_entries():
 def test_memory_lru_rejects_zero_max_items():
     with pytest.raises(ValueError):
         MemoryLRU[str, int](max_items=0)
+
+
+from pathlib import Path
+
+from kira.legal_sources._common.lru import TmpDiskLRU
+
+
+def test_disk_lru_put_and_get(tmp_path: Path):
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=1024)
+    cache.put("a.json", b'{"x": 1}')
+    assert cache.get("a.json") == b'{"x": 1}'
+
+
+def test_disk_lru_get_returns_none_on_miss(tmp_path: Path):
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=1024)
+    assert cache.get("missing.json") is None
+
+
+def test_disk_lru_evicts_when_over_byte_budget(tmp_path: Path):
+    # Budget 100 bytes; each entry is 50 bytes; third entry forces eviction.
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=100)
+    cache.put("a.json", b"x" * 50)
+    cache.put("b.json", b"y" * 50)
+    # Access "a" so "b" is LRU.
+    cache.get("a.json")
+    cache.put("c.json", b"z" * 50)
+    assert cache.get("b.json") is None
+    assert cache.get("a.json") == b"x" * 50
+    assert cache.get("c.json") == b"z" * 50
+
+
+def test_disk_lru_overwrites_existing_key_without_double_counting(tmp_path: Path):
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=100)
+    cache.put("a.json", b"x" * 50)
+    cache.put("a.json", b"y" * 80)  # in-place replace
+    assert cache.bytes_used == 80
+    assert cache.get("a.json") == b"y" * 80
+
+
+def test_disk_lru_creates_root_if_missing(tmp_path: Path):
+    target = tmp_path / "nested" / "cache"
+    cache = TmpDiskLRU(root=target, max_bytes=100)
+    cache.put("a.json", b"x")
+    assert target.is_dir()
+    assert (target / "a.json").exists()
+
+
+def test_disk_lru_rejects_keys_with_path_separators(tmp_path: Path):
+    cache = TmpDiskLRU(root=tmp_path, max_bytes=100)
+    with pytest.raises(ValueError):
+        cache.put("../escape.json", b"x")
+    with pytest.raises(ValueError):
+        cache.put("a/b.json", b"x")
