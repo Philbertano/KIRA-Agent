@@ -7,6 +7,12 @@ from kira.legal_sources.gesetze.schema import (
     LookupNormInput,
     LookupNormResult,
     LookupNormSuccess,
+    SearchNormError,
+    SearchNormErrorCode,
+    SearchNormHit,
+    SearchNormInput,
+    SearchNormResult,
+    SearchNormSuccess,
 )
 
 
@@ -96,16 +102,6 @@ def test_result_union_discriminator():
     )
     assert isinstance(success, LookupNormResult.__args__)  # type: ignore[attr-defined]
     assert isinstance(err, LookupNormResult.__args__)  # type: ignore[attr-defined]
-
-
-from kira.legal_sources.gesetze.schema import (
-    SearchNormError,
-    SearchNormErrorCode,
-    SearchNormHit,
-    SearchNormInput,
-    SearchNormResult,
-    SearchNormSuccess,
-)
 
 
 def test_search_input_minimal_validates():

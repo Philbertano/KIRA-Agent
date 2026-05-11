@@ -60,18 +60,12 @@ def is_citable(entry: TocEntry) -> bool:
     for pat in _REJECT_SLUG_PATTERNS:
         if pat.search(slug):
             return False
-    for pat in _REJECT_TITLE_PATTERNS:
-        if pat.search(entry.title):
-            return False
-    return True
+    return all(not pat.search(entry.title) for pat in _REJECT_TITLE_PATTERNS)
 
 
 def fetch_toc(client: httpx.Client) -> list[TocEntry]:
     proxy = os.environ.get("LEGAL_INGEST_PROXY_URL")
-    if proxy:
-        url = f"{proxy.rstrip('/')}/?url={quote(GII_TOC_URL, safe='')}"
-    else:
-        url = GII_TOC_URL
+    url = f"{proxy.rstrip('/')}/?url={quote(GII_TOC_URL, safe='')}" if proxy else GII_TOC_URL
     resp = client.get(url)
     resp.raise_for_status()
     return parse_toc(resp.content)

@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from kira.legal_sources._common.lru import MemoryLRU
+from kira.legal_sources._common.lru import MemoryLRU, TmpDiskLRU
 
 
 def test_memory_lru_get_returns_none_on_miss():
@@ -48,11 +50,6 @@ def test_memory_lru_size_reflects_entries():
 def test_memory_lru_rejects_zero_max_items():
     with pytest.raises(ValueError):
         MemoryLRU[str, int](max_items=0)
-
-
-from pathlib import Path
-
-from kira.legal_sources._common.lru import TmpDiskLRU
 
 
 def test_disk_lru_put_and_get(tmp_path: Path):

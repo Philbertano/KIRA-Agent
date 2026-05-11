@@ -6,8 +6,8 @@ import pytest
 from botocore.exceptions import ClientError
 
 from kira.legal_sources._common.embedder import (
-    CohereMultilingualEmbedder,
     EMBEDDING_DIMENSION,
+    CohereMultilingualEmbedder,
 )
 from kira.legal_sources._common.errors import EmbeddingUnavailableError
 
@@ -29,7 +29,7 @@ def test_embed_documents_returns_vectors_in_order():
     vectors = embedder.embed_documents(["a", "b"])
     assert len(vectors) == 2
     assert len(vectors[0]) == EMBEDDING_DIMENSION
-    args, kwargs = client.invoke_model.call_args
+    kwargs = client.invoke_model.call_args.kwargs
     body = json.loads(kwargs["body"])
     assert body["input_type"] == "search_document"
     assert body["texts"] == ["a", "b"]

@@ -11,6 +11,8 @@ environment.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections import OrderedDict as _OrderedDict
+from pathlib import Path
 from typing import Generic, TypeVar
 
 K = TypeVar("K")
@@ -44,10 +46,6 @@ class MemoryLRU(Generic[K, V]):
         self._data[key] = value
         if len(self._data) > self._max_items:
             self._data.popitem(last=False)
-
-
-from collections import OrderedDict as _OrderedDict
-from pathlib import Path
 
 
 class TmpDiskLRU:

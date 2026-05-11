@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import Callable
 
 from kira.legal_sources.gesetze.corpus_format import GesetzMeta, Norm
 from kira.legal_sources.gesetze.schema import (

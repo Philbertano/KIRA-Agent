@@ -17,10 +17,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
 from kira.legal_sources._common.errors import CorpusUnavailableError
 from kira.legal_sources._common.s3_corpus import LazyCorpusLoader
+from kira.legal_sources._common.vector_index import VectorIndex
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
-from kira.legal_sources.gesetze.schema import LookupNormInput
+from kira.legal_sources.gesetze.schema import LookupNormInput, SearchNormInput
+from kira.legal_sources.gesetze.search_norm import search_norm
 
 TOOL_DESCRIPTION = (
     "Lädt den autoritativen Wortlaut eines deutschen Paragraphen aus "
@@ -65,12 +68,6 @@ def make_sdk_tool(*, loader: LazyCorpusLoader | None = None):
 
 def _text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
-
-
-from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
-from kira.legal_sources._common.vector_index import VectorIndex
-from kira.legal_sources.gesetze.schema import SearchNormInput
-from kira.legal_sources.gesetze.search_norm import search_norm
 
 
 def make_search_norm_tool_function(

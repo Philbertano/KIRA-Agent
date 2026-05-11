@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -80,7 +79,7 @@ def test_ingest_writes_per_paragraph_files_and_meta(
         )
 
         from kira.legal_sources.adapters.ingest_handler import handler
-        result = handler({}, None)
+        handler({}, None)
 
     s3 = boto3.client("s3", region_name="eu-central-1")
     # _meta.json was written
@@ -111,8 +110,6 @@ def test_ingest_skips_unchanged_paragraph(monkeypatch, s3_target, mock_aws_clien
     """Second invocation with no upstream change → no PUT for unchanged §s, no re-embed."""
     monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_target)
     mock_aws_clients["embedder"].embed_documents.return_value = [[0.1] * 1024]
-
-    s3 = boto3.client("s3", region_name="eu-central-1")
 
     with respx.mock:
         respx.get("https://www.gesetze-im-internet.de/gii-toc.xml").mock(
@@ -215,7 +212,7 @@ def test_ingest_diff_only_re_embeds_changed_paragraphs(
         )
 
         from kira.legal_sources.adapters.ingest_handler import handler
-        result = handler({}, None)
+        handler({}, None)
 
     # Same content sha → no embedding, no upsert
     assert mock_aws_clients["embedder"].embed_documents.call_count == 0

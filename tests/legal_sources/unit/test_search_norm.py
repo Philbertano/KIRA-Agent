@@ -1,4 +1,3 @@
-import pytest
 
 from kira.legal_sources._common.errors import (
     CorpusUnavailableError,

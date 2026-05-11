@@ -1,8 +1,6 @@
 """Opt-in V2 live smoke. Run with: RUN_LIVE_TESTS=1 pytest -m live."""
 
 import os
-import zipfile
-from io import BytesIO
 
 import boto3
 import httpx

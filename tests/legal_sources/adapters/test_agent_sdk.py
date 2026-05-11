@@ -4,6 +4,7 @@ that we test its core function (`make_lookup_norm_tool_function`) directly."""
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -90,9 +91,6 @@ async def test_make_tool_function_returns_mcp_shape(tmp_path, monkeypatch):
     assert "content" in out
     assert out["content"][0]["type"] == "text"
     assert "Mietvertrag" in out["content"][0]["text"]
-
-
-from unittest.mock import MagicMock
 
 
 @pytest.mark.asyncio

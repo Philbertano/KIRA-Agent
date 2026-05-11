@@ -15,7 +15,6 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
 from kira.legal_sources._common.lru import MemoryLRU, TmpDiskLRU
@@ -59,7 +58,7 @@ class LazyCorpusLoader:
         self._tmp = TmpDiskLRU(root=TMP_CACHE_DIR, max_bytes=TMP_BYTE_BUDGET)
 
     @classmethod
-    def from_env(cls) -> "LazyCorpusLoader":
+    def from_env(cls) -> LazyCorpusLoader:
         local = os.environ.get(ENV_LOCAL_DIR)
         bucket = os.environ.get(ENV_S3_BUCKET)
         return cls(

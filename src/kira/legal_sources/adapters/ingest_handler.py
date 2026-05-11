@@ -70,7 +70,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
                     upstream_xml_zip=entry.link,
                     prior=old_manifest.get(abk_slug),
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append({"abkuerzung": abk_slug, "error": str(exc)})
                 continue
             if outcome == "written":
@@ -121,7 +121,6 @@ def _process_one(
     abk = abk_slug.upper()
     today_iso = date.today().isoformat()
     new_paragraphen: dict[str, dict[str, Any]] = {}
-    to_upsert: list[VectorRecord] = []
     embed_inputs: list[str] = []
     embed_keys: list[str] = []
     deleted_keys: list[str] = []

@@ -28,13 +28,15 @@ def main() -> int:
     print("=== 1. Lookup BGB §535 ===")
     r = _invoke(args.lookup_fn, args.region, {"gesetz": "BGB", "paragraph": "535"})
     if r.get("isError"):
-        print("FAIL:", r, file=sys.stderr); return 1
+        print("FAIL:", r, file=sys.stderr)
+        return 1
     print(json.loads(r["content"][0]["text"])["titel"])
 
     print("\n=== 2. Lookup WEG §14 (proves all-laws coverage) ===")
     r = _invoke(args.lookup_fn, args.region, {"gesetz": "WEG", "paragraph": "14"})
     if r.get("isError"):
-        print("FAIL:", r, file=sys.stderr); return 1
+        print("FAIL:", r, file=sys.stderr)
+        return 1
     print(json.loads(r["content"][0]["text"])["titel"])
 
     print("\n=== 3. Search 'Pflichten des Vermieters zur Erhaltung der Mietsache' ===")
@@ -43,7 +45,8 @@ def main() -> int:
         "k": 3,
     })
     if r.get("isError"):
-        print("FAIL:", r, file=sys.stderr); return 1
+        print("FAIL:", r, file=sys.stderr)
+        return 1
     body = json.loads(r["content"][0]["text"])
     paragraphs = [(h["gesetz"], h["paragraph"]) for h in body["hits"]]
     print("Top hits:", paragraphs)
@@ -56,7 +59,8 @@ def main() -> int:
         "k": 1,
     })
     if r.get("isError"):
-        print("FAIL:", r, file=sys.stderr); return 1
+        print("FAIL:", r, file=sys.stderr)
+        return 1
     body = json.loads(r["content"][0]["text"])
     print("Top:", body["hits"][0]["gesetz"], "§", body["hits"][0]["paragraph"])
 

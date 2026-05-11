@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import httpx
-import pytest
 import respx
 
 from kira.legal_sources._common.toc import (

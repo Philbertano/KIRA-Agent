@@ -1,14 +1,9 @@
-import json
 from datetime import date
-from pathlib import Path
-
-import pytest
 
 from kira.legal_sources.gesetze.corpus_format import (
     Absatz,
     GesetzMeta,
     Norm,
-    NormIndexEntry,
 )
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import (

@@ -110,7 +110,7 @@ def main() -> int:
                 slug = slug_for(entry.link)
                 try:
                     outcome, embed_jobs, embed_md = fut.result()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.error("Gesetz %s failed: %s", slug, exc)
                     results[slug] = "error"
                     continue
