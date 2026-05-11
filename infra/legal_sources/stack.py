@@ -1,4 +1,4 @@
-"""Legal-sources CDK stack: S3 corpus + lookup Lambda + ingest Lambda + schedule.
+"""Legal-sources CDK stack: S3 corpus + lookup Lambda + ingest Lambda + schedule + search.
 
 Region pinned to eu-central-1.
 """
@@ -18,6 +18,9 @@ from aws_cdk import (
     aws_events_targets as targets,
 )
 from aws_cdk import (
+    aws_iam as iam,
+)
+from aws_cdk import (
     aws_kms as kms,
 )
 from aws_cdk import (
@@ -30,9 +33,14 @@ from aws_cdk import (
     aws_s3 as s3,
 )
 from aws_cdk import (
+    aws_s3vectors as s3vectors,
+)
+from aws_cdk import (
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
+
+REQUIRED_REGION = "eu-central-1"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -99,6 +107,7 @@ class LegalSourcesStack(cdk.Stack):
             code=code,
             memory_size=512,
             timeout=cdk.Duration.seconds(10),
+            ephemeral_storage_size=cdk.Size.mebibytes(1024),
             environment={"LEGAL_CORPUS_BUCKET": bucket.bucket_name},
             log_retention=logs.RetentionDays.ONE_MONTH,
         )
@@ -144,8 +153,8 @@ class LegalSourcesStack(cdk.Stack):
             architecture=arch,
             handler="kira.legal_sources.adapters.ingest_handler.handler",
             code=code,
-            memory_size=1024,
-            timeout=cdk.Duration.minutes(5),
+            memory_size=1536,
+            timeout=cdk.Duration.minutes(15),
             environment=ingest_environment,
             log_retention=logs.RetentionDays.ONE_MONTH,
         )
@@ -187,5 +196,74 @@ class LegalSourcesStack(cdk.Stack):
             alarm_description="Ingest has not run in 48h — corpus may be stale.",
         )
 
+        # S3 Vectors bucket + index for semantic norm search.
+        # The aws_s3vectors module only exposes L1 (Cfn*) constructs in this CDK version.
+        vector_bucket = s3vectors.CfnVectorBucket(
+            self,
+            "LegalNormsVectorBucket",
+            vector_bucket_name="kira-legal-norms",
+        )
+
+        vector_index = s3vectors.CfnIndex(
+            self,
+            "LegalNormsVectorIndex",
+            vector_bucket_name="kira-legal-norms",
+            index_name="kira-legal-norms",
+            dimension=1024,
+            distance_metric="COSINE",
+            data_type="FLOAT32",
+        )
+        vector_index.add_dependency(vector_bucket)
+
+        # Search Lambda: embed query via Cohere, query S3 Vectors index.
+        search_fn = lambda_.Function(
+            self,
+            "SearchNormFn",
+            function_name="kira-legal-search",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            architecture=arch,
+            handler="kira.legal_sources.adapters.search_handler.handler",
+            code=code,
+            memory_size=512,
+            timeout=cdk.Duration.seconds(5),
+            environment={
+                "LEGAL_VECTOR_INDEX_NAME": "kira-legal-norms",
+            },
+            log_retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        # Search Lambda: bedrock:InvokeModel on Cohere + s3vectors:QueryVectors
+        search_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:aws:bedrock:{REQUIRED_REGION}::foundation-model/cohere.embed-multilingual-v3"
+                ],
+            )
+        )
+        search_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3vectors:QueryVectors"],
+                resources=["*"],  # tighten once ARN format is stable in CDK
+            )
+        )
+
+        # Ingest Lambda: bedrock:InvokeModel + s3vectors:PutVectors/DeleteVectors
+        ingest_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:aws:bedrock:{REQUIRED_REGION}::foundation-model/cohere.embed-multilingual-v3"
+                ],
+            )
+        )
+        ingest_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3vectors:PutVectors", "s3vectors:DeleteVectors"],
+                resources=["*"],
+            )
+        )
+
         cdk.CfnOutput(self, "LookupFnArn", value=lookup_fn.function_arn)
+        cdk.CfnOutput(self, "SearchFnArn", value=search_fn.function_arn)
         cdk.CfnOutput(self, "BucketName", value=bucket.bucket_name)
