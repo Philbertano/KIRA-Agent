@@ -83,3 +83,20 @@ def test_empty_input_returns_empty_list_without_calling_bedrock():
     embedder = CohereMultilingualEmbedder(bedrock_client=client)
     assert embedder.embed_documents([]) == []
     assert client.invoke_model.call_count == 0
+
+
+def test_handles_real_cohere_response_with_nested_float_key():
+    """Cohere v3 with `embedding_types: ["float"]` wraps the list under
+    `embeddings.float`. The parser must unwrap that shape."""
+    real_shape_response = {
+        "id": "abc",
+        "texts": ["a", "b"],
+        "embeddings": {"float": [[0.1] * 1024, [0.2] * 1024]},
+        "response_type": "embeddings_by_type",
+    }
+    client = _fake_bedrock_client(real_shape_response)
+    embedder = CohereMultilingualEmbedder(bedrock_client=client)
+    vectors = embedder.embed_documents(["a", "b"])
+    assert len(vectors) == 2
+    assert vectors[0][0] == 0.1
+    assert vectors[1][0] == 0.2

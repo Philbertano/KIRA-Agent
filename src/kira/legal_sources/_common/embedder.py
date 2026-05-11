@@ -70,5 +70,12 @@ class CohereMultilingualEmbedder:
                     f"Bedrock InvokeModel failed: {exc}"
                 ) from exc
             payload = json.loads(response["body"].read())
-            out.extend(payload["embeddings"])
+            # Cohere v3 with `embedding_types: ["float"]` returns
+            # {"embeddings": {"float": [[...], ...]}}.
+            # Without `embedding_types` (legacy), it returns
+            # {"embeddings": [[...], ...]}. Handle both for forward-compat.
+            raw_embeddings = payload["embeddings"]
+            if isinstance(raw_embeddings, dict):
+                raw_embeddings = raw_embeddings.get("float", [])
+            out.extend(raw_embeddings)
         return out
