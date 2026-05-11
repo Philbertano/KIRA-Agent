@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Gesetze und Verordnungen</title>
+    <item>
+      <title>Bürgerliches Gesetzbuch</title>
+      <link>https://www.gesetze-im-internet.de/bgb/xml.zip</link>
+      <description>BGB</description>
+    </item>
+    <item>
+      <title>Wohnungseigentumsgesetz</title>
+      <link>https://www.gesetze-im-internet.de/woeigg/xml.zip</link>
+      <description>WEG</description>
+    </item>
+    <item>
+      <title>Betriebskostenverordnung</title>
+      <link>https://www.gesetze-im-internet.de/betrkv/xml.zip</link>
+      <description>BetrKV</description>
+    </item>
+    <item>
+      <title>Bekanntmachung über Beispielverordnung</title>
+      <link>https://www.gesetze-im-internet.de/beispielbek/xml.zip</link>
+      <description>BeispielBek</description>
+    </item>
+    <item>
+      <title>Geschäftsordnung des Rats</title>
+      <link>https://www.gesetze-im-internet.de/ratsgo/xml.zip</link>
+      <description>RatsGO</description>
+    </item>
+    <item>
+      <title>Bundesentschädigungsgesetz (aufgehoben)</title>
+      <link>https://www.gesetze-im-internet.de/beg/xml.zip</link>
+      <description>BEG</description>
+    </item>
+  </channel>
+</rss>
