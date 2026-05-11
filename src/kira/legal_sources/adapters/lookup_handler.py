@@ -1,4 +1,5 @@
-"""AWS Lambda handler for the lookup_norm tool, invoked by AgentCore Gateway."""
+"""Lambda entrypoint for lookup_norm — wires lazy-load against the
+LazyCorpusLoader."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from kira.legal_sources._common.errors import CorpusUnavailableError
-from kira.legal_sources._common.s3_corpus import CorpusLoader
+from kira.legal_sources._common.s3_corpus import LazyCorpusLoader
 from kira.legal_sources.gesetze.lookup_norm import lookup_norm
 from kira.legal_sources.gesetze.schema import (
     LookupNormError,
@@ -19,40 +20,36 @@ from kira.legal_sources.gesetze.schema import (
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-# Module-level loader: warm Lambdas reuse the same /tmp cache and manifest etag.
-_LOADER = CorpusLoader.from_env()
+# Module-level loader: warm Lambdas reuse the same /tmp + memory caches.
+_LOADER = LazyCorpusLoader.from_env()
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    args = _extract_args(event)
+    args = event.get("input") if isinstance(event, dict) and "input" in event else event
     try:
-        payload = LookupNormInput.model_validate(args)
+        payload = LookupNormInput.model_validate(args if isinstance(args, dict) else {})
     except ValidationError as exc:
         return _err(LookupNormErrorCode.VALIDATION_ERROR, str(exc))
     try:
-        corpus = _LOADER.load_all()
+        result = lookup_norm(
+            payload,
+            load_meta=_LOADER.load_meta,
+            load_norm=lambda _gesetz, key: _LOADER.load_norm(key),
+        )
     except CorpusUnavailableError as exc:
         return _err(LookupNormErrorCode.CORPUS_UNAVAILABLE, str(exc))
-    result = lookup_norm(payload, corpus=corpus)
     body = result.model_dump_json()
     is_error = isinstance(result, LookupNormError)
     log.info(
-        "lookup_norm invocation",
+        "lookup_norm",
         extra={
             "gesetz": payload.gesetz,
             "paragraph": payload.paragraph,
             "absatz": payload.absatz,
             "is_error": is_error,
-            "corpus_stand": getattr(result, "stand", None),
         },
     )
     return {"isError": is_error, "content": [{"type": "text", "text": body}]}
-
-
-def _extract_args(event: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(event, dict) and "input" in event and isinstance(event["input"], dict):
-        return event["input"]
-    return event if isinstance(event, dict) else {}
 
 
 def _err(code: LookupNormErrorCode, message: str) -> dict[str, Any]:
