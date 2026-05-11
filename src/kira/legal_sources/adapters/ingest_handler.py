@@ -1,8 +1,4 @@
-"""Daily ingest Lambda: refresh the S3 legal corpus.
-
-Reuses `kira.knowledge.ingest` for parsing — this is a deployment-glue
-adapter and is allowed to import from kira.*.
-"""
+"""Daily ingest Lambda v2: TOC-discovery + per-paragraph diff + embedding upsert."""
 
 from __future__ import annotations
 
@@ -11,6 +7,7 @@ import json
 import logging
 import os
 import re
+from datetime import date
 from typing import Any
 from urllib.parse import quote
 
@@ -18,190 +15,303 @@ import boto3
 import botocore.exceptions
 import httpx
 
-from kira.knowledge.ingest import GESETZE, GesetzKonfiguration
+from kira.knowledge.ingest import _extract_xml_from_zip
+from kira.knowledge.xml_parser import parse_gii_xml
+from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
 from kira.legal_sources._common.region import REQUIRED_REGION
-
-# Pattern matching the leading "(N)" or "(Na)" Absatz marker that
-# kira.knowledge.xml_parser preserves in each <P> element.
-_ABSATZ_PREFIX = re.compile(r"^\(\s*(\d+[a-zA-Z]?)\s*\)\s*(.*)$", re.DOTALL)
+from kira.legal_sources._common.toc import fetch_toc, is_citable, slug_for
+from kira.legal_sources._common.vector_index import VectorIndex, VectorRecord
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 USER_AGENT = "KIRA-Agent/0.1 (legal-sources ingest; eu-central-1)"
+GII_BASE = "https://www.gesetze-im-internet.de"
+INDEX_NAME = os.environ.get("LEGAL_VECTOR_INDEX_NAME", "kira-legal-norms")
 
-# When set, all upstream fetches go through this Cloudflare Worker proxy.
-# The Worker is expected to accept ?url=<encoded_target_url> and stream the
-# upstream response body unchanged. See infra/cloudflare/juris-proxy/.
-ENV_PROXY_URL = "LEGAL_INGEST_PROXY_URL"
-ENV_PROXY_AUTH_HEADER = "LEGAL_INGEST_PROXY_AUTH_HEADER"  # default: X-Proxy-Auth
-ENV_PROXY_AUTH_VALUE = "LEGAL_INGEST_PROXY_AUTH_VALUE"
+_ABSATZ_PREFIX = re.compile(r"^\(\s*(\d+[a-zA-Z]?)\s*\)\s*(.*)$", re.DOTALL)
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     bucket = os.environ["LEGAL_CORPUS_BUCKET"]
-    requested = event.get("gesetze") or list(GESETZE.keys())
     s3 = boto3.client("s3", region_name=REQUIRED_REGION)
-    written: list[str] = []
-    skipped: list[str] = []
+    embedder = _make_embedder()
+    vector_index = _make_vector_index()
 
     proxy_headers = _proxy_auth_headers()
+    written: list[str] = []
+    skipped: list[str] = []
+    errors: list[dict[str, str]] = []
 
     with httpx.Client(
         timeout=httpx.Timeout(60.0, connect=10.0),
         headers={"User-Agent": USER_AGENT, **proxy_headers},
         follow_redirects=True,
     ) as client:
-        for key in requested:
-            cfg: GesetzKonfiguration | None = GESETZE.get(key.lower())
-            if cfg is None:
-                log.warning("Unknown Gesetz %s — skipped", key)
+        toc = fetch_toc(client)
+        citable = [e for e in toc if is_citable(e)]
+        log.info(
+            "TOC fetched", extra={"total": len(toc), "citable": len(citable)}
+        )
+
+        old_manifest = _read_manifest(s3, bucket)
+
+        for entry in citable:
+            abk_slug = slug_for(entry.link)
+            try:
+                outcome = _process_one(
+                    client=client,
+                    s3=s3,
+                    bucket=bucket,
+                    embedder=embedder,
+                    vector_index=vector_index,
+                    title=entry.title,
+                    abk_slug=abk_slug,
+                    upstream_xml_zip=entry.link,
+                    prior=old_manifest.get(abk_slug),
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append({"abkuerzung": abk_slug, "error": str(exc)})
                 continue
-            payload = _build_payload(client, cfg)
-            body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-            new_sha = hashlib.sha256(body).hexdigest()
-            s3_key = f"gesetze/{cfg.abkuerzung.lower()}.json"
-            existing_sha = _existing_sha(s3, bucket, s3_key)
-            if existing_sha == new_sha:
-                skipped.append(cfg.abkuerzung.lower())
-                continue
+            if outcome == "written":
+                written.append(abk_slug)
+            elif outcome == "skipped":
+                skipped.append(abk_slug)
+
+    _write_manifest(s3, bucket, citable, s3_now_stand=date.today().isoformat())
+    return {"written": written, "skipped": skipped, "errors": errors}
+
+
+def _process_one(
+    *,
+    client: httpx.Client,
+    s3: Any,
+    bucket: str,
+    embedder: CohereMultilingualEmbedder,
+    vector_index: VectorIndex,
+    title: str,
+    abk_slug: str,
+    upstream_xml_zip: str,
+    prior: dict[str, str] | None,
+) -> str:
+    """Returns 'written', 'skipped', or 'no-source'."""
+    proxied_xml_zip = _via_proxy(upstream_xml_zip)
+
+    head_headers: dict[str, str] = {}
+    if prior:
+        if prior.get("upstream_etag"):
+            head_headers["If-None-Match"] = prior["upstream_etag"]
+        if prior.get("upstream_last_modified"):
+            head_headers["If-Modified-Since"] = prior["upstream_last_modified"]
+
+    head_resp = client.head(proxied_xml_zip, headers=head_headers)
+    if head_resp.status_code == 304:
+        return "skipped"
+    if head_resp.status_code != 200:
+        return "no-source"
+
+    new_etag = head_resp.headers.get("ETag", "")
+    new_last_modified = head_resp.headers.get("Last-Modified", "")
+
+    get_resp = client.get(proxied_xml_zip)
+    get_resp.raise_for_status()
+    xml_bytes = _extract_xml_from_zip(get_resp.content)
+    parsed = parse_gii_xml(xml_bytes)
+
+    abk = abk_slug.upper()
+    today_iso = date.today().isoformat()
+    new_paragraphen: dict[str, dict[str, Any]] = {}
+    to_upsert: list[VectorRecord] = []
+    embed_inputs: list[str] = []
+    embed_keys: list[str] = []
+    deleted_keys: list[str] = []
+
+    old_meta = _read_old_meta(s3, bucket, abk_slug)
+    old_para_shas = {
+        p: e.get("content_sha256", "")
+        for p, e in (old_meta.get("paragraphen") or {}).items()
+    }
+
+    for paragraph, norm in parsed.normen.items():
+        norm_payload = {
+            "gesetz": abk,
+            "paragraph": paragraph,
+            "titel": norm.titel,
+            "absaetze": [_split_absatz(s) for s in norm.absaetze],
+            "quelle_url": f"{GII_BASE}/{abk_slug}/__{paragraph}.html",
+        }
+        norm_body = json.dumps(norm_payload, ensure_ascii=False, sort_keys=True)
+        sha = hashlib.sha256(norm_body.encode("utf-8")).hexdigest()
+        norm_key = f"gesetze/{abk_slug}/{paragraph}.json"
+        new_paragraphen[paragraph] = {
+            "titel": norm.titel,
+            "key": norm_key,
+            "content_sha256": sha,
+        }
+        if old_para_shas.get(paragraph) != sha:
             s3.put_object(
                 Bucket=bucket,
-                Key=s3_key,
-                Body=body,
+                Key=norm_key,
+                Body=norm_body.encode("utf-8"),
                 ContentType="application/json",
-                Metadata={"content-sha256": new_sha},
+                Metadata={"content-sha256": sha},
             )
-            written.append(cfg.abkuerzung.lower())
+            embed_inputs.append(_embed_input(abk, paragraph, norm_payload))
+            embed_keys.append(f"{abk_slug}-{paragraph}")
 
-    _write_manifest(s3, bucket)
-    return {"written": written, "skipped": skipped}
+    # Detect deletions
+    for old_p in old_para_shas:
+        if old_p not in new_paragraphen:
+            deleted_keys.append(f"{abk_slug}-{old_p}")
+            s3.delete_object(Bucket=bucket, Key=f"gesetze/{abk_slug}/{old_p}.json")
 
+    type_str = "Verordnung" if "verord" in title.lower() else "Gesetz"
 
-def _build_payload(client: httpx.Client, cfg: GesetzKonfiguration) -> dict[str, Any]:
-    """Adapter shim: reuses _ingest_one's logic but writes locally instead of disk.
-
-    `_ingest_one` writes to a Path; we want bytes. We re-implement the flow
-    using the same building blocks.
-    """
-    from datetime import date
-
-    from kira.knowledge.ingest import _extract_xml_from_zip
-    from kira.knowledge.xml_parser import filter_normen, parse_gii_xml
-
-    fetch_url = _via_proxy(cfg.zip_url)
-    response = client.get(fetch_url)
-    response.raise_for_status()
-    xml_bytes = _extract_xml_from_zip(response.content)
-    parsed = parse_gii_xml(xml_bytes)
-    filtered = filter_normen(
-        parsed,
-        paragraphen=cfg.paragraphen,
-        paragraph_range=cfg.paragraph_range,
+    meta_payload = {
+        "abkuerzung": abk,
+        "titel": title,
+        "type": type_str,
+        "stand": today_iso,
+        "quelle": "gesetze-im-internet.de",
+        "quelle_url": f"{GII_BASE}/{abk_slug}",
+        "upstream_xml_zip_url": upstream_xml_zip,
+        "paragraphen": new_paragraphen,
+    }
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"gesetze/{abk_slug}/_meta.json",
+        Body=json.dumps(meta_payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        ContentType="application/json",
+        Metadata={
+            "upstream_etag": new_etag,
+            "upstream_last_modified": new_last_modified,
+        },
     )
-    if not filtered:
-        raise RuntimeError(
-            f"Keine Paragraphen für {cfg.abkuerzung} extrahiert — Filter prüfen."
-        )
-    return {
-        "_meta": {
-            "abkuerzung": cfg.abkuerzung,
-            "titel": cfg.titel,
-            "stand": date.today().isoformat(),
-            "quelle": "gesetze-im-internet.de",
-            "quelle_url": cfg.base_url,
-            "gefiltert_auf": (
-                [f"§§ {cfg.paragraph_range[0]}–{cfg.paragraph_range[1]}"]  # noqa: RUF001
-                if cfg.paragraph_range
-                else (cfg.paragraphen or ["vollständig"])
-            ),
-            "anzahl_normen": len(filtered),
-        },
-        "paragraphen": {
-            p: _norm_to_corpus_format(p, n, f"{cfg.base_url}/__{p}.html")
-            for p, n in sorted(filtered.items(), key=_sort_key)
-        },
-    }
 
+    # Embeddings
+    if embed_inputs:
+        vectors = embedder.embed_documents(embed_inputs)
+        records = [
+            VectorRecord(
+                key=k,
+                vector=v,
+                metadata={
+                    "gesetz": abk,
+                    "paragraph": k.split("-", 1)[1],
+                    "abkuerzung": abk,
+                    "type": type_str,
+                    "titel": new_paragraphen[k.split("-", 1)[1]]["titel"],
+                    "wortlaut": _read_norm_wortlaut(s3, bucket, abk_slug, k.split("-", 1)[1]),
+                    "quelle_url": f"{GII_BASE}/{abk_slug}/__{k.split('-', 1)[1]}.html",
+                    "stand": today_iso,
+                    "content_sha256": new_paragraphen[k.split("-", 1)[1]]["content_sha256"],
+                },
+            )
+            for k, v in zip(embed_keys, vectors, strict=True)
+        ]
+        vector_index.upsert(records)
+    if deleted_keys:
+        vector_index.delete(deleted_keys)
 
-def _norm_to_corpus_format(
-    paragraph: str, norm: Any, quelle_url: str
-) -> dict[str, Any]:
-    """Convert a kira.knowledge `Norm` into the legal_sources corpus_format shape.
-
-    The on-disk JSON expected by `kira.legal_sources.gesetze.corpus_format` requires
-    each Absatz as `{"nummer": str, "text": str}`. The xml_parser produces
-    `list[str]` where each entry is the raw `<P>` text, typically prefixed with
-    `(N)`. This converter parses that prefix.
-    """
-    return {
-        "paragraph": paragraph,
-        "titel": norm.titel,
-        "absaetze": [_split_absatz(s) for s in norm.absaetze],
-        "quelle_url": quelle_url,
-    }
+    return "written"
 
 
 def _split_absatz(raw: str) -> dict[str, str]:
-    match = _ABSATZ_PREFIX.match(raw)
-    if match:
-        return {"nummer": match.group(1), "text": match.group(2).strip()}
+    m = _ABSATZ_PREFIX.match(raw)
+    if m:
+        return {"nummer": m.group(1), "text": m.group(2).strip()}
     return {"nummer": "", "text": raw.strip()}
 
 
-def _via_proxy(direct_url: str) -> str:
-    """Wrap an upstream URL with the configured Cloudflare Worker proxy.
+def _embed_input(abk: str, paragraph: str, payload: dict) -> str:
+    body = "\n\n".join(
+        f"({a['nummer']}) {a['text']}" for a in payload["absaetze"]
+    )
+    return f"{abk} §{paragraph} ({payload['titel']}):\n\n{body}"
 
-    Returns `direct_url` unchanged when LEGAL_INGEST_PROXY_URL is unset, so
-    local development against a residential ISP keeps working without a
-    proxy round-trip.
-    """
-    proxy = os.environ.get(ENV_PROXY_URL)
+
+def _read_norm_wortlaut(s3: Any, bucket: str, abk_slug: str, paragraph: str) -> str:
+    body = s3.get_object(Bucket=bucket, Key=f"gesetze/{abk_slug}/{paragraph}.json")
+    data = json.loads(body["Body"].read())
+    return "\n\n".join(f"({a['nummer']}) {a['text']}" for a in data["absaetze"])
+
+
+def _read_manifest(s3: Any, bucket: str) -> dict[str, dict[str, str]]:
+    try:
+        body = s3.get_object(Bucket=bucket, Key="gesetze/_manifest.json")
+    except botocore.exceptions.ClientError:
+        return {}
+    payload = json.loads(body["Body"].read())
+    return {
+        abk: {
+            "upstream_etag": entry.get("upstream_etag", ""),
+            "upstream_last_modified": entry.get("upstream_last_modified", ""),
+        }
+        for abk, entry in payload.get("gesetze", {}).items()
+    }
+
+
+def _read_old_meta(s3: Any, bucket: str, abk_slug: str) -> dict:
+    try:
+        body = s3.get_object(Bucket=bucket, Key=f"gesetze/{abk_slug}/_meta.json")
+    except botocore.exceptions.ClientError:
+        return {}
+    return json.loads(body["Body"].read())
+
+
+def _write_manifest(s3: Any, bucket: str, citable: list, s3_now_stand: str) -> None:
+    """Compose the manifest from current meta objects in S3."""
+    gesetze: dict[str, dict[str, Any]] = {}
+    for entry in citable:
+        abk_slug = slug_for(entry.link)
+        try:
+            meta_resp = s3.get_object(
+                Bucket=bucket, Key=f"gesetze/{abk_slug}/_meta.json"
+            )
+        except botocore.exceptions.ClientError:
+            continue
+        meta = json.loads(meta_resp["Body"].read())
+        meta_meta = meta_resp.get("Metadata", {}) or {}
+        gesetze[abk_slug] = {
+            "abkuerzung": meta["abkuerzung"],
+            "titel": meta["titel"],
+            "type": meta["type"],
+            "meta_key": f"gesetze/{abk_slug}/_meta.json",
+            "upstream_etag": meta_meta.get("upstream_etag", ""),
+            "upstream_last_modified": meta_meta.get("upstream_last_modified", ""),
+        }
+    payload = {"version": 2, "stand": s3_now_stand, "gesetze": gesetze}
+    s3.put_object(
+        Bucket=bucket,
+        Key="gesetze/_manifest.json",
+        Body=json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+def _via_proxy(direct_url: str) -> str:
+    proxy = os.environ.get("LEGAL_INGEST_PROXY_URL")
     if not proxy:
         return direct_url
     return f"{proxy.rstrip('/')}/?url={quote(direct_url, safe='')}"
 
 
 def _proxy_auth_headers() -> dict[str, str]:
-    """Header dict to attach the proxy's shared-secret bearer.
-
-    Returns an empty dict if no auth value is configured. Header name
-    defaults to X-Proxy-Auth, overridable via LEGAL_INGEST_PROXY_AUTH_HEADER.
-    """
-    value = os.environ.get(ENV_PROXY_AUTH_VALUE)
+    value = os.environ.get("LEGAL_INGEST_PROXY_AUTH_VALUE")
     if not value:
         return {}
-    name = os.environ.get(ENV_PROXY_AUTH_HEADER) or "X-Proxy-Auth"
+    name = os.environ.get("LEGAL_INGEST_PROXY_AUTH_HEADER") or "X-Proxy-Auth"
     return {name: value}
 
 
-def _sort_key(item: tuple[str, object]) -> tuple[int, str]:
-    p = item[0]
-    m = re.match(r"^(\d+)([a-zA-Z]?)$", p)
-    if not m:
-        return (0, p)
-    return (int(m.group(1)), m.group(2))
-
-
-def _existing_sha(s3, bucket: str, key: str) -> str | None:
-    try:
-        head = s3.head_object(Bucket=bucket, Key=key)
-    except botocore.exceptions.ClientError:
-        return None
-    return (head.get("Metadata") or {}).get("content-sha256")
-
-
-def _write_manifest(s3, bucket: str) -> None:
-    objs = s3.list_objects_v2(Bucket=bucket, Prefix="gesetze/")
-    files = sorted(
-        o["Key"]
-        for o in objs.get("Contents", [])
-        if o["Key"].endswith(".json") and not o["Key"].endswith("_manifest.json")
+def _make_embedder() -> CohereMultilingualEmbedder:
+    return CohereMultilingualEmbedder(
+        bedrock_client=boto3.client("bedrock-runtime", region_name=REQUIRED_REGION),
     )
-    body = json.dumps({"version": 1, "files": files}, sort_keys=True).encode("utf-8")
-    s3.put_object(
-        Bucket=bucket,
-        Key="gesetze/_manifest.json",
-        Body=body,
-        ContentType="application/json",
+
+
+def _make_vector_index() -> VectorIndex:
+    return VectorIndex(
+        s3vectors_client=boto3.client("s3vectors", region_name=REQUIRED_REGION),
+        index_name=INDEX_NAME,
     )
