@@ -1,17 +1,11 @@
 // Cloudflare Worker: gesetze-im-internet.de proxy.
 //
-// Deployed at https://kira-legaltext-gii-proxy.philip-trempler.workers.dev.
-// Used by the kira-legal-ingest Lambda (eu-central-1) because juris.de's
-// edge blocks AWS IP ranges directly. Cloudflare's egress IPs are not on
-// that blocklist.
-//
-// Contract:
-//   GET /?url=<encoded-upstream-url>
-//   Header X-Proxy-Auth: <PROXY_SECRET>   (only required if PROXY_SECRET is set)
-// Response: streams the upstream body unchanged (preserves binary content
-// like xml.zip — earlier `await res.text()` corrupted bytes).
+// Streams binary bodies (xml.zip) through unchanged AND forwards conditional
+// request headers (If-None-Match, If-Modified-Since) so the ingest Lambda
+// can run cheap "did this change?" probes without re-downloading.
 
 const ALLOWED_PREFIX = 'https://www.gesetze-im-internet.de';
+const FORWARD_REQUEST_HEADERS = ['if-none-match', 'if-modified-since'];
 
 export default {
   async fetch(request, env) {
@@ -28,23 +22,33 @@ export default {
       return new Response('Missing or invalid URL', { status: 400 });
     }
 
-    const headers = {
+    const upstreamHeaders = {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       Accept: '*/*',
     };
+    for (const h of FORWARD_REQUEST_HEADERS) {
+      const v = request.headers.get(h);
+      if (v) upstreamHeaders[h] = v;
+    }
 
     try {
-      const upstream = await fetch(target, { headers });
-      // Stream the body through unchanged so binary content (xml.zip)
-      // survives the proxy hop without UTF-8 decoding.
+      const upstream = await fetch(target, {
+        method: request.method,  // pass-through GET or HEAD
+        headers: upstreamHeaders,
+      });
+      const passThroughHeaders = {
+        'Content-Type':
+          upstream.headers.get('content-type') || 'application/octet-stream',
+      };
+      for (const h of ['etag', 'last-modified', 'content-length']) {
+        const v = upstream.headers.get(h);
+        if (v) passThroughHeaders[h] = v;
+      }
       return new Response(upstream.body, {
         status: upstream.status,
-        headers: {
-          'Content-Type':
-            upstream.headers.get('content-type') || 'application/octet-stream',
-        },
+        headers: passThroughHeaders,
       });
     } catch (e) {
       return new Response('Fetch failed: ' + e.message, { status: 500 });
