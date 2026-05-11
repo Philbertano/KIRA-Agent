@@ -57,10 +57,11 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q -m 'not live'"
+addopts = "-ra -q -m 'not live and not perf'"
 asyncio_mode = "auto"
 markers = [
     "live: opt-in tests that hit the live network or AWS; require RUN_LIVE_TESTS=1",
+    "perf: opt-in performance budget tests; require RUN_PERF_TESTS=1 and a deployed stack",
 ]
 
 [tool.coverage.run]
