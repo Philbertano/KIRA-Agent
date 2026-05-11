@@ -96,3 +96,91 @@ def test_result_union_discriminator():
     )
     assert isinstance(success, LookupNormResult.__args__)  # type: ignore[attr-defined]
     assert isinstance(err, LookupNormResult.__args__)  # type: ignore[attr-defined]
+
+
+from kira.legal_sources.gesetze.schema import (
+    SearchNormError,
+    SearchNormErrorCode,
+    SearchNormHit,
+    SearchNormInput,
+    SearchNormResult,
+    SearchNormSuccess,
+)
+
+
+def test_search_input_minimal_validates():
+    inp = SearchNormInput.model_validate({"query": "Mietminderung Schimmel"})
+    assert inp.query == "Mietminderung Schimmel"
+    assert inp.k == 10  # default
+    assert inp.gesetz_filter is None
+    assert inp.type_filter is None
+
+
+def test_search_input_k_capped():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": "x", "k": 51})
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": "x", "k": 0})
+
+
+def test_search_input_query_must_be_nonempty():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": ""})
+
+
+def test_search_input_query_max_length():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": "x" * 5001})
+
+
+def test_search_input_extra_field_rejected():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": "x", "rogue": True})
+
+
+def test_search_input_filters_normalize_lowercase():
+    inp = SearchNormInput.model_validate(
+        {"query": "x", "gesetz_filter": ["BGB", "weg"]}
+    )
+    assert inp.gesetz_filter == ["bgb", "weg"]
+
+
+def test_search_input_type_filter_validates_enum():
+    from pydantic import ValidationError
+    SearchNormInput.model_validate({"query": "x", "type_filter": ["Gesetz"]})
+    with pytest.raises(ValidationError):
+        SearchNormInput.model_validate({"query": "x", "type_filter": ["Sonstiges"]})
+
+
+def test_search_success_serializes():
+    s = SearchNormSuccess(
+        query="x",
+        hits=[
+            SearchNormHit(
+                gesetz="BGB",
+                paragraph="535",
+                absatz=None,
+                titel="t",
+                wortlaut="w",
+                quelle_url="https://example.test",
+                stand="2026-05-09",
+                score=0.94,
+            )
+        ],
+    )
+    dumped = s.model_dump()
+    assert dumped["hits"][0]["gesetz"] == "BGB"
+
+
+def test_search_result_union():
+    success = SearchNormSuccess(query="x", hits=[])
+    err = SearchNormError(
+        error=SearchNormErrorCode.EMBEDDING_UNAVAILABLE,
+        message="bedrock down",
+    )
+    assert isinstance(success, SearchNormResult.__args__)  # type: ignore[attr-defined]
+    assert isinstance(err, SearchNormResult.__args__)  # type: ignore[attr-defined]

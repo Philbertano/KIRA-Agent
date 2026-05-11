@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -80,3 +81,71 @@ class LookupNormError(BaseModel):
 
 
 LookupNormResult = LookupNormSuccess | LookupNormError
+
+
+class SearchNormErrorCode(StrEnum):
+    EMBEDDING_UNAVAILABLE = "embedding_unavailable"
+    CORPUS_UNAVAILABLE = "corpus_unavailable"
+    VALIDATION_ERROR = "validation_error"
+
+
+class SearchNormInput(BaseModel):
+    """Eingabe für das Tool `search_norm`."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    query: str = Field(..., min_length=1, max_length=5000)
+    k: int = Field(default=10, ge=1, le=50)
+    gesetz_filter: list[str] | None = None
+    type_filter: list[Literal["Gesetz", "Verordnung"]] | None = None
+
+    @field_validator("gesetz_filter")
+    @classmethod
+    def _normalize_gesetz_filter(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        return [s.strip().lower() for s in v]
+
+
+class SearchNormHit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gesetz: str
+    paragraph: str
+    absatz: str | None
+    titel: str
+    wortlaut: str
+    quelle_url: str
+    stand: str
+    score: float
+
+
+class SearchNormSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    hits: list[SearchNormHit]
+
+    def to_agent_text(self) -> str:
+        if not self.hits:
+            return f"Keine Treffer für: {self.query!r}"
+        lines = [f"# Suche: {self.query!r}", ""]
+        for h in self.hits:
+            lines.append(
+                f"- **{h.gesetz} § {h.paragraph}** ({h.score:.0%}) — {h.titel}"
+            )
+            lines.append(f"  _{h.quelle_url} | Stand: {h.stand}_")
+        return "\n".join(lines)
+
+
+class SearchNormError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: SearchNormErrorCode
+    message: str
+
+    def to_agent_text(self) -> str:
+        return f"FEHLER ({self.error.value}): {self.message}"
+
+
+SearchNormResult = SearchNormSuccess | SearchNormError
