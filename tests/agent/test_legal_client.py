@@ -45,3 +45,19 @@ def test_invoke_passes_function_name_and_payload() -> None:
     args, kwargs = fake.invoke.call_args
     assert kwargs["FunctionName"] == "some-fn"
     assert json.loads(kwargs["Payload"]) == {"a": 1}
+
+
+def test_lookup_norm_invokes_lookup_function() -> None:
+    envelope = {"isError": False, "content": [{"type": "text", "text": json.dumps({"gesetz": "BGB"})}]}
+    fake = _make_lambda(envelope)
+    client = LegalSourcesClient(lambda_client=fake, lookup_fn_name="lookup-fn")
+    client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+    assert fake.invoke.call_args.kwargs["FunctionName"] == "lookup-fn"
+
+
+def test_search_norm_invokes_search_function() -> None:
+    envelope = {"isError": False, "content": [{"type": "text", "text": json.dumps({"hits": []})}]}
+    fake = _make_lambda(envelope)
+    client = LegalSourcesClient(lambda_client=fake, search_fn_name="search-fn")
+    client.search_norm({"query": "x"})
+    assert fake.invoke.call_args.kwargs["FunctionName"] == "search-fn"

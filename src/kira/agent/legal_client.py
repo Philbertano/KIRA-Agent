@@ -76,3 +76,9 @@ class LegalSourcesClient:
         envelope = json.loads(raw)
         text = envelope["content"][0]["text"]
         return json.loads(text)
+
+    def lookup_norm(self, inp: dict) -> dict:
+        return self._invoke(self.lookup_fn_name, inp)
+
+    def search_norm(self, inp: dict) -> dict:
+        return self._invoke(self.search_fn_name, inp)
