@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import textwrap
 
-from kira.legal_sources._common.xml_parser import parse_gii_xml
+import pytest
+
+from kira.legal_sources._common.xml_parser import normalize_paragraph, parse_gii_xml
 
 
 FIXTURE_BGB_AUSZUG = textwrap.dedent(
@@ -171,3 +173,15 @@ def test_parse_handles_missing_optional_fields() -> None:
     assert norm.fundstelle is None
     assert norm.abschnitt is None
     assert norm.absaetze == ["Inhalt"]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("§ 535", "535"),
+    ("§535", "535"),
+    ("535", "535"),
+    ("536a", "536a"),
+    ("§ 536 BGB", "536"),
+    ("§ 1 BGB", "1"),
+])
+def test_normalize_paragraph_strips_paragraph_marker_and_gesetz_suffix(raw: str, expected: str) -> None:
+    assert normalize_paragraph(raw) == expected
