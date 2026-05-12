@@ -1,14 +1,17 @@
 """Repair the corpus by replacing slug-derived abkuerzungen with the
-canonical ones from gii-toc.xml's <description> field.
+canonical jurabk from each Gesetz's source XML.
 
 Background: V2 backfill mistakenly set `abkuerzung = slug.upper()` rather
-than the canonical jurabk from the XML. This script reads gii-toc.xml,
-builds a slug→canonical-abkuerzung map, and rewrites:
+than reading the canonical `<jurabk>` from the upstream XML. The TOC at
+gii-toc.xml only carries title+link, so the only authoritative source is
+the per-Gesetz xml.zip. This script:
 
-  1. Local /tmp/kira-corpus-local/gesetze/<slug>/_meta.json (in-place)
-  2. Optionally per-§ JSONs' `gesetz` field (--rewrite-norms)
-  3. Re-uploads to S3
-  4. Regenerates _manifest.json + re-upserts vector metadata via Cohere
+  1. For each local _meta.json, fetches upstream xml.zip and extracts <jurabk>
+  2. Rewrites _meta.json `abkuerzung` field (in place)
+  3. Optionally rewrites per-§ JSONs' `gesetz` field (--rewrite-norms)
+  4. Syncs local corpus back to S3
+  5. Regenerates _manifest.json
+  6. Optionally re-upserts vector metadata via Cohere (--refresh-vectors)
 
 This is a one-time repair. Once the ingest code (which now reads
 `parsed.abkuerzung`) runs daily, the corpus stays correct.
@@ -17,12 +20,16 @@ This is a one-time repair. Once the ingest code (which now reads
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import io
 import json
 import logging
 import os
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import boto3
 import httpx
@@ -30,8 +37,10 @@ from botocore.config import Config
 
 from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
 from kira.legal_sources._common.region import REQUIRED_REGION
-from kira.legal_sources._common.toc import GII_TOC_URL, parse_toc, slug_for
 from kira.legal_sources._common.vector_index import VectorIndex, VectorRecord
+
+GII_BASE = "https://www.gesetze-im-internet.de"
+USER_AGENT = "KIRA-Agent/0.1 (repair-abkuerzung; residential)"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
 log = logging.getLogger("repair-abk")
@@ -47,30 +56,50 @@ def main() -> int:
         log.error("Local corpus dir %s does not exist", local_root)
         return 2
 
-    # 1) Build slug → abkuerzung map from gii-toc.xml descriptions.
-    log.info("Fetching gii-toc.xml for slug→abkuerzung map")
-    with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True) as c:
-        resp = c.get(GII_TOC_URL)
-        resp.raise_for_status()
-    entries = parse_toc(resp.content)
-    slug_to_abk: dict[str, str] = {}
-    raw_root = __import__("xml.etree.ElementTree", fromlist=["ElementTree"]).fromstring(resp.content)
-    # parse_toc strips <description> — re-walk the XML to pick up descriptions.
-    for item in raw_root.iter("item"):
-        link_el = item.find("link")
-        desc_el = item.find("description")
-        if link_el is None or desc_el is None:
-            continue
-        slug = slug_for((link_el.text or "").strip())
-        desc = (desc_el.text or "").strip()
-        if slug and desc:
-            slug_to_abk[slug] = desc
-    log.info("TOC: %d entries, %d slug→abk pairs", len(entries), len(slug_to_abk))
-
-    # 2) Walk local _meta.json files, fix abkuerzung in place.
+    # 1) Walk local _meta.json files.
     meta_paths = sorted(local_root.glob("*/_meta.json"))
     log.info("Walking %d local _meta.json files", len(meta_paths))
+
+    # 2) Fetch each upstream xml.zip in parallel, extract <jurabk>.
+    log.info("Fetching xml.zip for %d Gesetze with %d parallel workers",
+             len(meta_paths), args.fetch_parallel)
+    slug_to_abk: dict[str, str] = {}
+    failed: list[str] = []
+    with httpx.Client(
+        timeout=httpx.Timeout(60.0, connect=15.0),
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+        limits=httpx.Limits(
+            max_keepalive_connections=args.fetch_parallel,
+            max_connections=args.fetch_parallel * 2,
+        ),
+    ) as client:
+        slugs = [p.parent.name for p in meta_paths]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.fetch_parallel) as pool:
+            futures = {pool.submit(_fetch_jurabk, client, slug): slug for slug in slugs}
+            done = 0
+            for fut in concurrent.futures.as_completed(futures):
+                slug = futures[fut]
+                try:
+                    jurabk = fut.result()
+                    if jurabk:
+                        slug_to_abk[slug] = jurabk
+                    else:
+                        failed.append(slug)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Fetch %s failed: %s", slug, exc)
+                    failed.append(slug)
+                done += 1
+                if done % 500 == 0:
+                    log.info("  fetched %d/%d (ok=%d fail=%d)",
+                             done, len(slugs), len(slug_to_abk), len(failed))
+    log.info("Fetched: %d ok, %d failed", len(slug_to_abk), len(failed))
+    if failed:
+        log.info("First 10 failures: %s", failed[:10])
+
+    # 3) Rewrite local _meta.json (and per-§ JSONs if --rewrite-norms).
     rewritten = 0
+    unchanged = 0
     for meta_path in meta_paths:
         slug = meta_path.parent.name
         canonical = slug_to_abk.get(slug)
@@ -78,6 +107,7 @@ def main() -> int:
             continue
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if meta.get("abkuerzung") == canonical:
+            unchanged += 1
             continue
         meta["abkuerzung"] = canonical
         meta_path.write_text(
@@ -98,7 +128,7 @@ def main() -> int:
                         )
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Skip per-§ %s: %s", p_path, exc)
-    log.info("Rewrote %d _meta.json files", rewritten)
+    log.info("Rewrote %d _meta.json files (%d already correct)", rewritten, unchanged)
 
     if args.dry_run:
         log.warning("--dry-run set; NOT syncing back to S3 or re-upserting vectors")
@@ -238,6 +268,30 @@ def _flush(buf, embedder, vector_index):
         log.error("Upsert failed (%d): %s", len(buf), exc)
 
 
+def _fetch_jurabk(client: httpx.Client, slug: str) -> str | None:
+    """Download upstream xml.zip, extract jurabk from the first <jurabk> element."""
+    url = f"{GII_BASE}/{slug}/xml.zip"
+    resp = client.get(url)
+    if resp.status_code != 200:
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            xml_name = next((n for n in zf.namelist() if n.endswith(".xml")), None)
+            if not xml_name:
+                return None
+            xml_bytes = zf.read(xml_name)
+    except zipfile.BadZipFile:
+        return None
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return None
+    el = root.find(".//jurabk")
+    if el is not None and el.text:
+        return el.text.strip()
+    return None
+
+
 def _truncate_to_bytes(s: str, max_bytes: int) -> str:
     encoded = s.encode("utf-8")
     if len(encoded) <= max_bytes:
@@ -252,6 +306,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--vector-index", default="kira-norms")
     p.add_argument("--vector-bucket", default="kira-legal-norms")
     p.add_argument("--embed-batch", type=int, default=96)
+    p.add_argument("--fetch-parallel", type=int, default=16)
     p.add_argument("--rewrite-norms", action="store_true",
                    help="Also rewrite per-§ JSONs' `gesetz` field")
     p.add_argument("--refresh-vectors", action="store_true",
