@@ -77,8 +77,7 @@ def main() -> int:
         slugs = [p.parent.name for p in meta_paths]
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.fetch_parallel) as pool:
             futures = {pool.submit(_fetch_jurabk, client, slug): slug for slug in slugs}
-            done = 0
-            for fut in concurrent.futures.as_completed(futures):
+            for done, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
                 slug = futures[fut]
                 try:
                     jurabk = fut.result()
@@ -86,10 +85,9 @@ def main() -> int:
                         slug_to_abk[slug] = jurabk
                     else:
                         failed.append(slug)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.warning("Fetch %s failed: %s", slug, exc)
                     failed.append(slug)
-                done += 1
                 if done % 500 == 0:
                     log.info("  fetched %d/%d (ok=%d fail=%d)",
                              done, len(slugs), len(slug_to_abk), len(failed))
@@ -126,7 +124,7 @@ def main() -> int:
                             json.dumps(p_payload, ensure_ascii=False, sort_keys=True),
                             encoding="utf-8",
                         )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.warning("Skip per-§ %s: %s", p_path, exc)
     log.info("Rewrote %d _meta.json files (%d already correct)", rewritten, unchanged)
 
@@ -206,7 +204,7 @@ def main() -> int:
             abk = meta["abkuerzung"]
             type_str = meta["type"]
             stand = meta["stand"]
-            for paragraph in meta["paragraphen"].keys():
+            for paragraph in meta["paragraphen"]:
                 p_path = meta_path.parent / f"{paragraph}.json"
                 if not p_path.exists():
                     continue
@@ -255,7 +253,7 @@ def _flush(buf, embedder, vector_index):
     mds = [m for _, _, m in buf]
     try:
         vectors = embedder.embed_documents(texts)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.error("Embed batch failed (%d): %s", len(buf), exc)
         return
     try:
@@ -264,7 +262,7 @@ def _flush(buf, embedder, vector_index):
             for k, v, m in zip(keys, vectors, mds, strict=True)
         ]
         vector_index.upsert(records)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.error("Upsert failed (%d): %s", len(buf), exc)
 
 

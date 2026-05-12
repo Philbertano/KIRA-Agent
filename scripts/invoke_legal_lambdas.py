@@ -224,7 +224,7 @@ def _shorten(text: str, limit: int) -> str:
 
 
 def _bar(score: float) -> str:
-    filled = max(0, min(10, int(round(score * 10))))
+    filled = max(0, min(10, round(score * 10)))
     return "█" * filled + "░" * (10 - filled)
 
 
@@ -254,7 +254,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser("search", help="Semantic search over the full corpus")
     ps.add_argument("query", help="Natural-language query (German)")
     ps.add_argument("-k", type=int, default=10, help="Number of hits (1-50, default 10)")
-    ps.add_argument("--gesetz", nargs="+", help="Limit to one or more abkuerzungen, e.g. --gesetz BGB WoEigG")
+    ps.add_argument("--gesetz", nargs="+",
+                    help="Limit to one or more abkuerzungen, e.g. --gesetz BGB WoEigG")
     ps.add_argument("--type", nargs="+", choices=["Gesetz", "Verordnung"],
                     help="Limit to Gesetz, Verordnung, or both")
     _common_flags(ps)
