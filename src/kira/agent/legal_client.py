@@ -61,3 +61,18 @@ class LegalSourcesClient:
             )
             lambda_client = boto3.client("lambda", region_name=region, config=cfg)
         self._lambda = lambda_client
+
+    def _invoke(self, fn_name: str, payload: dict) -> dict:
+        """Invoke a Lambda and return the unwrapped inner dict.
+
+        Returns the inner JSON regardless of whether the Lambda set
+        isError=True (functional errors are passed through). Raises
+        LegalSourceUnavailable on infrastructure failures.
+        """
+        import json
+        body = json.dumps(payload).encode("utf-8")
+        resp = self._lambda.invoke(FunctionName=fn_name, Payload=body)
+        raw = resp["Payload"].read()
+        envelope = json.loads(raw)
+        text = envelope["content"][0]["text"]
+        return json.loads(text)

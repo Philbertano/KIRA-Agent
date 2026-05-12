@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import json
+from unittest.mock import MagicMock
+
 from kira.agent.legal_client import LegalSourceUnavailable, LegalSourcesClient
 
 
@@ -14,3 +18,30 @@ def test_client_constructs_with_defaults() -> None:
     assert client.lookup_fn_name == "kira-legal-lookup-norm"
     assert client.search_fn_name == "kira-legal-search"
     assert client.region == "eu-central-1"
+
+
+def _make_lambda(envelope: dict) -> MagicMock:
+    mock = MagicMock()
+    payload = io.BytesIO(json.dumps(envelope).encode("utf-8"))
+    mock.invoke.return_value = {"Payload": payload, "StatusCode": 200}
+    return mock
+
+
+def test_invoke_unwraps_mcp_envelope() -> None:
+    envelope = {
+        "isError": False,
+        "content": [{"type": "text", "text": json.dumps({"gesetz": "BGB", "paragraph": "535"})}],
+    }
+    client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
+    result = client._invoke("kira-legal-lookup-norm", {"gesetz": "BGB", "paragraph": "535"})
+    assert result == {"gesetz": "BGB", "paragraph": "535"}
+
+
+def test_invoke_passes_function_name_and_payload() -> None:
+    envelope = {"isError": False, "content": [{"type": "text", "text": "{}"}]}
+    fake = _make_lambda(envelope)
+    client = LegalSourcesClient(lambda_client=fake)
+    client._invoke("some-fn", {"a": 1})
+    args, kwargs = fake.invoke.call_args
+    assert kwargs["FunctionName"] == "some-fn"
+    assert json.loads(kwargs["Payload"]) == {"a": 1}
