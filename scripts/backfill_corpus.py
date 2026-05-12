@@ -32,9 +32,9 @@ from typing import Any
 import boto3
 import httpx
 
-from kira.knowledge.ingest import _extract_xml_from_zip
-from kira.knowledge.xml_parser import parse_gii_xml
 from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
+from kira.legal_sources._common.xml_parser import parse_gii_xml
+from kira.legal_sources._common.zip_extract import extract_xml_from_zip
 from kira.legal_sources._common.region import REQUIRED_REGION
 from kira.legal_sources._common.toc import fetch_toc, is_citable, slug_for
 from kira.legal_sources._common.vector_index import VectorIndex, VectorRecord
@@ -195,7 +195,7 @@ def _process_one(
 
     resp = client.get(upstream_xml_zip)
     resp.raise_for_status()
-    xml_bytes = _extract_xml_from_zip(resp.content)
+    xml_bytes = extract_xml_from_zip(resp.content)
     parsed = parse_gii_xml(xml_bytes)
 
     # Canonical abbreviation from the XML's <jurabk>; fallback to slug-upper.
