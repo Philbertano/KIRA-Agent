@@ -198,7 +198,8 @@ def _process_one(
     xml_bytes = _extract_xml_from_zip(resp.content)
     parsed = parse_gii_xml(xml_bytes)
 
-    abk = abk_slug.upper()
+    # Canonical abbreviation from the XML's <jurabk>; fallback to slug-upper.
+    abk = parsed.abkuerzung if parsed.abkuerzung and parsed.abkuerzung != "?" else abk_slug.upper()
     today_iso = date.today().isoformat()
     new_paragraphen: dict[str, dict[str, Any]] = {}
     embed_jobs: list[tuple[str, str]] = []

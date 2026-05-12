@@ -217,3 +217,59 @@ def test_ingest_diff_only_re_embeds_changed_paragraphs(
     # Same content sha → no embedding, no upsert
     assert mock_aws_clients["embedder"].embed_documents.call_count == 0
     assert mock_aws_clients["vector_index"].upsert.call_count == 0
+
+
+def test_ingest_uses_xml_jurabk_not_slug_upper(
+    monkeypatch, s3_target, mock_aws_clients
+):
+    """The stored abkuerzung must come from the XML's <jurabk> element, not
+    from `slug.upper()`. Regression: V2 deploy stored `WOEIGG` for the WEG
+    because the slug-derived form differed from the canonical jurabk."""
+    monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_target)
+    mock_aws_clients["embedder"].embed_documents.return_value = [[0.1] * 1024]
+
+    from kira.knowledge.xml_parser import Norm, ParseResult
+
+    fake_parse_result = ParseResult(
+        abkuerzung="CANONICAL-ABK",
+        titel="Test Gesetz",
+        normen={
+            "1": Norm(
+                gesetz="CANONICAL-ABK",
+                paragraph="1",
+                titel="Test",
+                absaetze=["(1) Test."],
+            )
+        },
+    )
+
+    with respx.mock, patch(
+        "kira.legal_sources.adapters.ingest_handler.parse_gii_xml",
+        return_value=fake_parse_result,
+    ):
+        respx.get("https://www.gesetze-im-internet.de/gii-toc.xml").mock(
+            return_value=httpx.Response(200, content=TOC_FIXTURE.read_bytes())
+        )
+        respx.head("https://www.gesetze-im-internet.de/bgb/xml.zip").mock(
+            return_value=httpx.Response(200, headers={"ETag": "\"abc\""})
+        )
+        respx.get("https://www.gesetze-im-internet.de/bgb/xml.zip").mock(
+            return_value=httpx.Response(200, content=_bgb_zip())
+        )
+        respx.head("https://www.gesetze-im-internet.de/woeigg/xml.zip").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.head("https://www.gesetze-im-internet.de/betrkv/xml.zip").mock(
+            return_value=httpx.Response(404)
+        )
+
+        from kira.legal_sources.adapters.ingest_handler import handler
+        handler({}, None)
+
+    s3 = boto3.client("s3", region_name="eu-central-1")
+    meta = json.loads(
+        s3.get_object(Bucket=s3_target, Key="gesetze/bgb/_meta.json")["Body"].read()
+    )
+    # The fix: abkuerzung is the XML's <jurabk> value, NOT slug.upper().
+    assert meta["abkuerzung"] == "CANONICAL-ABK"
+    assert meta["abkuerzung"] != "BGB"

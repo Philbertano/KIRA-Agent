@@ -119,7 +119,11 @@ def _process_one(
     xml_bytes = _extract_xml_from_zip(get_resp.content)
     parsed = parse_gii_xml(xml_bytes)
 
-    abk = abk_slug.upper()
+    # Use the canonical abkuerzung from the XML's <jurabk> element when
+    # available; fall back to the URL slug. This makes "WEG" map to its
+    # source code's actual abbreviation (e.g., "WEG") rather than the
+    # uppercased slug (e.g., "WOEIGG").
+    abk = parsed.abkuerzung if parsed.abkuerzung and parsed.abkuerzung != "?" else abk_slug.upper()
     today_iso = date.today().isoformat()
     new_paragraphen: dict[str, dict[str, Any]] = {}
     embed_inputs: list[str] = []
