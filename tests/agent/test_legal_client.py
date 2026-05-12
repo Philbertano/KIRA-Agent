@@ -7,7 +7,10 @@ import json
 import logging
 from unittest.mock import MagicMock
 
-from kira.agent.legal_client import LegalSourceUnavailable, LegalSourcesClient
+import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError, ReadTimeoutError
+
+from kira.agent.legal_client import LegalSourcesClient, LegalSourceUnavailable
 
 
 def test_legal_source_unavailable_is_exception() -> None:
@@ -43,13 +46,16 @@ def test_invoke_passes_function_name_and_payload() -> None:
     fake = _make_lambda(envelope)
     client = LegalSourcesClient(lambda_client=fake)
     client._invoke("some-fn", {"a": 1})
-    args, kwargs = fake.invoke.call_args
+    kwargs = fake.invoke.call_args.kwargs
     assert kwargs["FunctionName"] == "some-fn"
     assert json.loads(kwargs["Payload"]) == {"a": 1}
 
 
 def test_lookup_norm_invokes_lookup_function() -> None:
-    envelope = {"isError": False, "content": [{"type": "text", "text": json.dumps({"gesetz": "BGB"})}]}
+    envelope = {
+        "isError": False,
+        "content": [{"type": "text", "text": json.dumps({"gesetz": "BGB"})}],
+    }
     fake = _make_lambda(envelope)
     client = LegalSourcesClient(lambda_client=fake, lookup_fn_name="lookup-fn")
     client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
@@ -70,10 +76,6 @@ def test_functional_error_passes_through() -> None:
     client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
     result = client.lookup_norm({"gesetz": "XYZ", "paragraph": "1"})
     assert result == inner
-
-
-import pytest
-from botocore.exceptions import ClientError, EndpointConnectionError, ReadTimeoutError
 
 
 def test_client_error_wrapped_as_unavailable() -> None:
@@ -97,7 +99,9 @@ def test_read_timeout_wrapped_as_unavailable() -> None:
 
 def test_connection_error_wrapped_as_unavailable() -> None:
     fake = MagicMock()
-    fake.invoke.side_effect = EndpointConnectionError(endpoint_url="lambda.eu-central-1.amazonaws.com")
+    fake.invoke.side_effect = EndpointConnectionError(
+        endpoint_url="lambda.eu-central-1.amazonaws.com"
+    )
     client = LegalSourcesClient(lambda_client=fake)
     with pytest.raises(LegalSourceUnavailable):
         client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
@@ -136,9 +140,11 @@ def test_invoke_logs_error_status_on_unavailable(caplog: pytest.LogCaptureFixtur
     fake = MagicMock()
     fake.invoke.side_effect = EndpointConnectionError(endpoint_url="x")
     client = LegalSourcesClient(lambda_client=fake)
-    with caplog.at_level(logging.WARNING, logger="kira.agent.legal_client"):
-        with pytest.raises(LegalSourceUnavailable):
-            client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+    with (
+        caplog.at_level(logging.WARNING, logger="kira.agent.legal_client"),
+        pytest.raises(LegalSourceUnavailable),
+    ):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
     matched = [r for r in caplog.records if r.message.startswith("legal_invoke")]
     assert len(matched) == 1
     assert getattr(matched[0], "status", None) == "unavailable"
