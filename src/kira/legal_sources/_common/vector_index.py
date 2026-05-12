@@ -39,11 +39,16 @@ class VectorIndex:
         *,
         s3vectors_client: Any,
         index_name: str,
+        vector_bucket_name: str | None = None,
         upsert_batch_size: int = DEFAULT_UPSERT_BATCH_SIZE,
         delete_batch_size: int = DEFAULT_DELETE_BATCH_SIZE,
     ) -> None:
         self._client = s3vectors_client
         self._index_name = index_name
+        # S3 Vectors requires (vectorBucketName, indexName) on every call.
+        # Default the bucket name to the index name since in our deploy they
+        # share the same value (one vector bucket per index).
+        self._vector_bucket_name = vector_bucket_name or index_name
         self._upsert_batch = upsert_batch_size
         self._delete_batch = delete_batch_size
 
@@ -53,6 +58,7 @@ class VectorIndex:
         for start in range(0, len(records), self._upsert_batch):
             batch = records[start : start + self._upsert_batch]
             self._client.put_vectors(
+                vectorBucketName=self._vector_bucket_name,
                 indexName=self._index_name,
                 vectors=[
                     {
@@ -70,6 +76,7 @@ class VectorIndex:
         for start in range(0, len(keys), self._delete_batch):
             batch = keys[start : start + self._delete_batch]
             self._client.delete_vectors(
+                vectorBucketName=self._vector_bucket_name,
                 indexName=self._index_name,
                 keys=batch,
             )
@@ -82,6 +89,7 @@ class VectorIndex:
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[VectorSearchHit]:
         kwargs: dict[str, Any] = {
+            "vectorBucketName": self._vector_bucket_name,
             "indexName": self._index_name,
             "queryVector": {"float32": vector},
             "topK": k,

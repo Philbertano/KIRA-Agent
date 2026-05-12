@@ -91,7 +91,17 @@ class LazyCorpusLoader:
         if cached is not None:
             return cached
         manifest = self.load_manifest()
+        # Try direct slug match first (e.g. 'bgb' -> manifest['bgb']).
         entry = manifest.gesetze.get(abk)
+        # Fallback: scan manifest for an entry whose `abkuerzung` matches
+        # case-insensitively. Lawyers type "WEG" but the URL slug is
+        # "woeigg" — the abkuerzung is the canonical lookup key.
+        if entry is None:
+            abk_upper = abk.upper()
+            for _slug, candidate in manifest.gesetze.items():
+                if candidate.abkuerzung.upper() == abk_upper:
+                    entry = candidate
+                    break
         if entry is None:
             return None
         raw = self._read_bytes(entry.meta_key)

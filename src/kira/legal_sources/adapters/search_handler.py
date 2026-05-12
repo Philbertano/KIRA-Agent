@@ -26,7 +26,8 @@ from kira.legal_sources.gesetze.search_norm import search_norm
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-_INDEX_NAME = os.environ.get("LEGAL_VECTOR_INDEX_NAME", "kira-legal-norms")
+_INDEX_NAME = os.environ.get("LEGAL_VECTOR_INDEX_NAME", "kira-norms")
+_BUCKET_NAME = os.environ.get("LEGAL_VECTOR_BUCKET_NAME", "kira-legal-norms")
 
 _embedder = CohereMultilingualEmbedder(
     bedrock_client=boto3.client("bedrock-runtime", region_name=REQUIRED_REGION),
@@ -34,6 +35,7 @@ _embedder = CohereMultilingualEmbedder(
 _index = VectorIndex(
     s3vectors_client=boto3.client("s3vectors", region_name=REQUIRED_REGION),
     index_name=_INDEX_NAME,
+    vector_bucket_name=_BUCKET_NAME,
 )
 
 

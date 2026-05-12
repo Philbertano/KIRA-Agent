@@ -134,6 +134,8 @@ class LegalSourcesStack(cdk.Stack):
         ingest_environment = {
             "LEGAL_CORPUS_BUCKET": bucket.bucket_name,
             "LEGAL_INGEST_PROXY_URL": proxy_url,
+            "LEGAL_VECTOR_INDEX_NAME": "kira-norms",
+            "LEGAL_VECTOR_BUCKET_NAME": "kira-legal-norms",
             # The CFN template stores a `{{resolve:secretsmanager:...}}`
             # dynamic reference, not the literal secret. CloudFormation
             # resolves it at deploy time and writes the value into the
@@ -208,10 +210,23 @@ class LegalSourcesStack(cdk.Stack):
             self,
             "LegalNormsVectorIndex",
             vector_bucket_name="kira-legal-norms",
-            index_name="kira-legal-norms",
+            index_name="kira-norms",  # renamed from kira-legal-norms to allow CFN replace
             dimension=1024,
             distance_metric="cosine",
             data_type="float32",
+            # S3 Vectors caps *filterable* metadata at 2 KB total per vector.
+            # The wortlaut + titel + URL routinely exceed that, but search_norm
+            # filters only on abkuerzung/type. Declare the heavy fields as
+            # non-filterable (40 KB cap each, returned but not indexed).
+            metadata_configuration={
+                "nonFilterableMetadataKeys": [
+                    "titel",
+                    "wortlaut",
+                    "quelle_url",
+                    "stand",
+                    "content_sha256",
+                ],
+            },
         )
         vector_index.add_dependency(vector_bucket)
 
@@ -227,7 +242,8 @@ class LegalSourcesStack(cdk.Stack):
             memory_size=512,
             timeout=cdk.Duration.seconds(5),
             environment={
-                "LEGAL_VECTOR_INDEX_NAME": "kira-legal-norms",
+                "LEGAL_VECTOR_INDEX_NAME": "kira-norms",
+                "LEGAL_VECTOR_BUCKET_NAME": "kira-legal-norms",
             },
             log_retention=logs.RetentionDays.ONE_MONTH,
         )
@@ -243,7 +259,7 @@ class LegalSourcesStack(cdk.Stack):
         )
         search_fn.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["s3vectors:QueryVectors"],
+                actions=["s3vectors:QueryVectors", "s3vectors:GetVectors"],
                 resources=["*"],  # tighten once ARN format is stable in CDK
             )
         )

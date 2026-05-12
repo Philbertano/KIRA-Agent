@@ -27,7 +27,8 @@ log.setLevel(logging.INFO)
 
 USER_AGENT = "KIRA-Agent/0.1 (legal-sources ingest; eu-central-1)"
 GII_BASE = "https://www.gesetze-im-internet.de"
-INDEX_NAME = os.environ.get("LEGAL_VECTOR_INDEX_NAME", "kira-legal-norms")
+INDEX_NAME = os.environ.get("LEGAL_VECTOR_INDEX_NAME", "kira-norms")
+BUCKET_NAME = os.environ.get("LEGAL_VECTOR_BUCKET_NAME", "kira-legal-norms")
 
 _ABSATZ_PREFIX = re.compile(r"^\(\s*(\d+[a-zA-Z]?)\s*\)\s*(.*)$", re.DOTALL)
 
@@ -313,4 +314,5 @@ def _make_vector_index() -> VectorIndex:
     return VectorIndex(
         s3vectors_client=boto3.client("s3vectors", region_name=REQUIRED_REGION),
         index_name=INDEX_NAME,
+        vector_bucket_name=BUCKET_NAME,
     )
