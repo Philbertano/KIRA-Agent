@@ -94,8 +94,9 @@ class LazyCorpusLoader:
         # Try direct slug match first (e.g. 'bgb' -> manifest['bgb']).
         entry = manifest.gesetze.get(abk)
         # Fallback: scan manifest for an entry whose `abkuerzung` matches
-        # case-insensitively. Lawyers type "WEG" but the URL slug is
-        # "woeigg" — the abkuerzung is the canonical lookup key.
+        # case-insensitively. The URL slug (e.g. "woeigg") differs from
+        # the canonical jurabk (e.g. "WoEigG") — this scan bridges both
+        # spellings and any case variant the caller provides.
         if entry is None:
             abk_upper = abk.upper()
             for _slug, candidate in manifest.gesetze.items():

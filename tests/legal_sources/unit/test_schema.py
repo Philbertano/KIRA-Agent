@@ -138,11 +138,13 @@ def test_search_input_extra_field_rejected():
         SearchNormInput.model_validate({"query": "x", "rogue": True})
 
 
-def test_search_input_filters_normalize_uppercase():
+def test_search_input_filters_strip_but_preserve_case():
+    """Filter values are stripped of whitespace but case is preserved —
+    vector metadata holds the canonical jurabk (`BetrKV`, `WoEigG`)."""
     inp = SearchNormInput.model_validate(
-        {"query": "x", "gesetz_filter": ["BGB", "weg"]}
+        {"query": "x", "gesetz_filter": [" BGB ", "WoEigG"]}
     )
-    assert inp.gesetz_filter == ["BGB", "WEG"]
+    assert inp.gesetz_filter == ["BGB", "WoEigG"]
 
 
 def test_search_input_type_filter_validates_enum():

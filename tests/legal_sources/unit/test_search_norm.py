@@ -82,6 +82,17 @@ def test_gesetz_filter_translates_to_metadata_filter():
     }
 
 
+def test_gesetz_filter_preserves_canonical_case():
+    """Filter values must NOT be uppercased — vector metadata holds the
+    canonical jurabk (`WoEigG`, `BetrKV`), and `$in` is case-sensitive."""
+    embed, search, calls = _make_callables(search_returns=[])
+    inp = SearchNormInput(query="x", gesetz_filter=["WoEigG", "BetrKV"])
+    search_norm(inp, embed=embed, search=search)
+    assert calls["search_kwargs"]["metadata_filter"] == {
+        "abkuerzung": {"$in": ["WoEigG", "BetrKV"]},
+    }
+
+
 def test_combined_filters_translate_correctly():
     embed, search, calls = _make_callables(search_returns=[])
     inp = SearchNormInput(
