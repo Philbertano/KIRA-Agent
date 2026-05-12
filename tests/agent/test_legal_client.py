@@ -61,3 +61,11 @@ def test_search_norm_invokes_search_function() -> None:
     client = LegalSourcesClient(lambda_client=fake, search_fn_name="search-fn")
     client.search_norm({"query": "x"})
     assert fake.invoke.call_args.kwargs["FunctionName"] == "search-fn"
+
+
+def test_functional_error_passes_through() -> None:
+    inner = {"error": "unknown_gesetz", "message": "Gesetz 'XYZ' ist nicht im Korpus."}
+    envelope = {"isError": True, "content": [{"type": "text", "text": json.dumps(inner)}]}
+    client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
+    result = client.lookup_norm({"gesetz": "XYZ", "paragraph": "1"})
+    assert result == inner
