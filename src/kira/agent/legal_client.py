@@ -7,12 +7,20 @@ tools import this client; the client mocks the Lambda surface for tests.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 from typing import Any
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -63,49 +71,59 @@ class LegalSourcesClient:
         self._lambda = lambda_client
 
     def _invoke(self, fn_name: str, payload: dict) -> dict:
-        import json
-        import time
-        from botocore.exceptions import (
-            BotoCoreError,
-            ClientError,
-            EndpointConnectionError,
-            ReadTimeoutError,
-        )
-
         body = json.dumps(payload).encode("utf-8")
         t0 = time.monotonic()
         try:
             resp = self._lambda.invoke(FunctionName=fn_name, Payload=body)
         except (ClientError, ReadTimeoutError, EndpointConnectionError, BotoCoreError) as exc:
-            latency_ms = round((time.monotonic() - t0) * 1000)
-            log.warning(
-                "legal_invoke",
-                extra={"function": fn_name, "status": "unavailable", "latency_ms": latency_ms},
-            )
+            self._log_outcome(fn_name, "unavailable", t0)
             raise LegalSourceUnavailable(f"Lambda invoke failed: {exc}") from exc
 
+        raw = resp["Payload"].read()
+        status_code = resp.get("StatusCode", 200)
+        function_error = resp.get("FunctionError")
+
+        # Lambda runtime caught an exception (Handled/Unhandled) — surface it
+        # instead of letting it parse as a missing-content envelope.
+        if function_error:
+            self._log_outcome(fn_name, "function_error", t0)
+            preview = raw[:500].decode("utf-8", errors="replace")
+            raise LegalSourceUnavailable(
+                f"Lambda {fn_name} returned FunctionError={function_error}: {preview}"
+            )
+
+        if status_code >= 300:
+            self._log_outcome(fn_name, "non_2xx", t0)
+            raise LegalSourceUnavailable(
+                f"Lambda {fn_name} returned StatusCode={status_code}"
+            )
+
         try:
-            raw = resp["Payload"].read()
             envelope = json.loads(raw)
             content = envelope.get("content") or []
             if not content:
                 raise LegalSourceUnavailable("Lambda response had empty content")
-            text = content[0]["text"]
-            inner = json.loads(text)
+            first = content[0]
+            if first.get("type") != "text":
+                raise LegalSourceUnavailable(
+                    f"Unexpected content block type: {first.get('type')!r}"
+                )
+            inner = json.loads(first["text"])
         except (KeyError, IndexError, ValueError, TypeError) as exc:
-            latency_ms = round((time.monotonic() - t0) * 1000)
-            log.warning(
-                "legal_invoke",
-                extra={"function": fn_name, "status": "malformed", "latency_ms": latency_ms},
-            )
+            self._log_outcome(fn_name, "malformed", t0)
             raise LegalSourceUnavailable(f"Malformed Lambda envelope: {exc}") from exc
 
-        latency_ms = round((time.monotonic() - t0) * 1000)
-        log.info(
-            "legal_invoke",
-            extra={"function": fn_name, "status": "ok", "latency_ms": latency_ms},
-        )
+        self._log_outcome(fn_name, "ok", t0)
         return inner
+
+    def _log_outcome(self, fn_name: str, status: str, t0: float) -> None:
+        latency_ms = round((time.monotonic() - t0) * 1000)
+        level = logging.INFO if status == "ok" else logging.WARNING
+        log.log(
+            level,
+            "legal_invoke",
+            extra={"function": fn_name, "status": status, "latency_ms": latency_ms},
+        )
 
     def lookup_norm(self, inp: dict) -> dict:
         return self._invoke(self.lookup_fn_name, inp)

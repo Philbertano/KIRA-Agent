@@ -123,6 +123,58 @@ def test_empty_content_wrapped_as_unavailable() -> None:
         client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
 
 
+def test_lambda_function_error_surfaces_error_payload() -> None:
+    """When Lambda runtime catches an exception, FunctionError is set; we
+    surface the original error rather than parsing the AWS error payload
+    as an MCP envelope."""
+    error_payload = io.BytesIO(b'{"errorMessage":"boom","errorType":"RuntimeError"}')
+    fake = MagicMock()
+    fake.invoke.return_value = {
+        "Payload": error_payload,
+        "StatusCode": 200,
+        "FunctionError": "Unhandled",
+    }
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable, match="FunctionError=Unhandled"):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_non_2xx_status_wrapped_as_unavailable() -> None:
+    fake = MagicMock()
+    fake.invoke.return_value = {
+        "Payload": io.BytesIO(b""),
+        "StatusCode": 500,
+    }
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable, match="StatusCode=500"):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_non_text_content_type_wrapped_as_unavailable() -> None:
+    envelope = {
+        "isError": False,
+        "content": [{"type": "image", "data": "..."}],
+    }
+    fake = _make_lambda(envelope)
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable, match="content block type"):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_env_var_overrides_function_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KIRA_LEGAL_LOOKUP_FN", "env-lookup")
+    monkeypatch.setenv("KIRA_LEGAL_SEARCH_FN", "env-search")
+    client = LegalSourcesClient()
+    assert client.lookup_fn_name == "env-lookup"
+    assert client.search_fn_name == "env-search"
+
+
+def test_constructor_arg_overrides_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KIRA_LEGAL_LOOKUP_FN", "env-lookup")
+    client = LegalSourcesClient(lookup_fn_name="explicit-lookup")
+    assert client.lookup_fn_name == "explicit-lookup"
+
+
 def test_invoke_logs_structured_line(caplog: pytest.LogCaptureFixture) -> None:
     envelope = {"isError": False, "content": [{"type": "text", "text": "{}"}]}
     client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
