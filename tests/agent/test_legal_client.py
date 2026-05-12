@@ -69,3 +69,50 @@ def test_functional_error_passes_through() -> None:
     client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
     result = client.lookup_norm({"gesetz": "XYZ", "paragraph": "1"})
     assert result == inner
+
+
+import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError, ReadTimeoutError
+
+
+def test_client_error_wrapped_as_unavailable() -> None:
+    fake = MagicMock()
+    fake.invoke.side_effect = ClientError(
+        error_response={"Error": {"Code": "ServiceUnavailable", "Message": "..."}},
+        operation_name="Invoke",
+    )
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_read_timeout_wrapped_as_unavailable() -> None:
+    fake = MagicMock()
+    fake.invoke.side_effect = ReadTimeoutError(endpoint_url="lambda.eu-central-1.amazonaws.com")
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_connection_error_wrapped_as_unavailable() -> None:
+    fake = MagicMock()
+    fake.invoke.side_effect = EndpointConnectionError(endpoint_url="lambda.eu-central-1.amazonaws.com")
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_malformed_envelope_wrapped_as_unavailable() -> None:
+    fake = MagicMock()
+    fake.invoke.return_value = {"Payload": io.BytesIO(b"not json"), "StatusCode": 200}
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_empty_content_wrapped_as_unavailable() -> None:
+    envelope = {"isError": False, "content": []}
+    fake = _make_lambda(envelope)
+    client = LegalSourcesClient(lambda_client=fake)
+    with pytest.raises(LegalSourceUnavailable):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})

@@ -63,19 +63,30 @@ class LegalSourcesClient:
         self._lambda = lambda_client
 
     def _invoke(self, fn_name: str, payload: dict) -> dict:
-        """Invoke a Lambda and return the unwrapped inner dict.
-
-        Returns the inner JSON regardless of whether the Lambda set
-        isError=True (functional errors are passed through). Raises
-        LegalSourceUnavailable on infrastructure failures.
-        """
         import json
+        from botocore.exceptions import (
+            BotoCoreError,
+            ClientError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        )
+
         body = json.dumps(payload).encode("utf-8")
-        resp = self._lambda.invoke(FunctionName=fn_name, Payload=body)
-        raw = resp["Payload"].read()
-        envelope = json.loads(raw)
-        text = envelope["content"][0]["text"]
-        return json.loads(text)
+        try:
+            resp = self._lambda.invoke(FunctionName=fn_name, Payload=body)
+        except (ClientError, ReadTimeoutError, EndpointConnectionError, BotoCoreError) as exc:
+            raise LegalSourceUnavailable(f"Lambda invoke failed: {exc}") from exc
+
+        try:
+            raw = resp["Payload"].read()
+            envelope = json.loads(raw)
+            content = envelope.get("content") or []
+            if not content:
+                raise LegalSourceUnavailable("Lambda response had empty content")
+            text = content[0]["text"]
+            return json.loads(text)
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            raise LegalSourceUnavailable(f"Malformed Lambda envelope: {exc}") from exc
 
     def lookup_norm(self, inp: dict) -> dict:
         return self._invoke(self.lookup_fn_name, inp)
