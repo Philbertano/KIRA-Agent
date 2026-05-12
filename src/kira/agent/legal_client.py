@@ -64,6 +64,7 @@ class LegalSourcesClient:
 
     def _invoke(self, fn_name: str, payload: dict) -> dict:
         import json
+        import time
         from botocore.exceptions import (
             BotoCoreError,
             ClientError,
@@ -72,9 +73,15 @@ class LegalSourcesClient:
         )
 
         body = json.dumps(payload).encode("utf-8")
+        t0 = time.monotonic()
         try:
             resp = self._lambda.invoke(FunctionName=fn_name, Payload=body)
         except (ClientError, ReadTimeoutError, EndpointConnectionError, BotoCoreError) as exc:
+            latency_ms = round((time.monotonic() - t0) * 1000)
+            log.warning(
+                "legal_invoke",
+                extra={"function": fn_name, "status": "unavailable", "latency_ms": latency_ms},
+            )
             raise LegalSourceUnavailable(f"Lambda invoke failed: {exc}") from exc
 
         try:
@@ -84,9 +91,21 @@ class LegalSourcesClient:
             if not content:
                 raise LegalSourceUnavailable("Lambda response had empty content")
             text = content[0]["text"]
-            return json.loads(text)
+            inner = json.loads(text)
         except (KeyError, IndexError, ValueError, TypeError) as exc:
+            latency_ms = round((time.monotonic() - t0) * 1000)
+            log.warning(
+                "legal_invoke",
+                extra={"function": fn_name, "status": "malformed", "latency_ms": latency_ms},
+            )
             raise LegalSourceUnavailable(f"Malformed Lambda envelope: {exc}") from exc
+
+        latency_ms = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "legal_invoke",
+            extra={"function": fn_name, "status": "ok", "latency_ms": latency_ms},
+        )
+        return inner
 
     def lookup_norm(self, inp: dict) -> dict:
         return self._invoke(self.lookup_fn_name, inp)

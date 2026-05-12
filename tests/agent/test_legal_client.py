@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from unittest.mock import MagicMock
 
 from kira.agent.legal_client import LegalSourceUnavailable, LegalSourcesClient
@@ -116,3 +117,28 @@ def test_empty_content_wrapped_as_unavailable() -> None:
     client = LegalSourcesClient(lambda_client=fake)
     with pytest.raises(LegalSourceUnavailable):
         client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+
+
+def test_invoke_logs_structured_line(caplog: pytest.LogCaptureFixture) -> None:
+    envelope = {"isError": False, "content": [{"type": "text", "text": "{}"}]}
+    client = LegalSourcesClient(lambda_client=_make_lambda(envelope))
+    with caplog.at_level(logging.INFO, logger="kira.agent.legal_client"):
+        client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+    matched = [r for r in caplog.records if r.message.startswith("legal_invoke")]
+    assert len(matched) == 1
+    rec = matched[0]
+    assert getattr(rec, "function", None) == client.lookup_fn_name
+    assert getattr(rec, "status", None) == "ok"
+    assert isinstance(getattr(rec, "latency_ms", None), int | float)
+
+
+def test_invoke_logs_error_status_on_unavailable(caplog: pytest.LogCaptureFixture) -> None:
+    fake = MagicMock()
+    fake.invoke.side_effect = EndpointConnectionError(endpoint_url="x")
+    client = LegalSourcesClient(lambda_client=fake)
+    with caplog.at_level(logging.WARNING, logger="kira.agent.legal_client"):
+        with pytest.raises(LegalSourceUnavailable):
+            client.lookup_norm({"gesetz": "BGB", "paragraph": "535"})
+    matched = [r for r in caplog.records if r.message.startswith("legal_invoke")]
+    assert len(matched) == 1
+    assert getattr(matched[0], "status", None) == "unavailable"
