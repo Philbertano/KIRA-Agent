@@ -1,79 +1,83 @@
-"""Tool: lookup_norm — schlägt eine Vorschrift in einem deutschen Gesetz nach.
+"""Tool: lookup_norm — looks up a specific § via the AWS legal-sources Lambda.
 
-Multi-Gesetz-Support: BGB, BetrKV, HeizkostenV, ... (alles, was in
-``kira.knowledge.gesetze/*.json`` oder im Overlay-Verzeichnis liegt).
-
-Der Stand des Korpus wird im Output mit ausgegeben — Tools warnen, wenn
-der lokale Stand älter als 6 Monate ist.
+Thin wrapper over LegalSourcesClient. The corpus and all parsing live
+in AWS; this tool only formats the response for the model.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from kira.agent.legal_client import LegalSourcesClient, LegalSourceUnavailable
 from kira.agent.tools._registry import Tool, register
-from kira.knowledge.loader import list_gesetze, load_gesetz, stand_warnung
+
+log = logging.getLogger(__name__)
+
+_client = LegalSourcesClient()
 
 
 def run(input_data: dict[str, Any]) -> str:
-    paragraph = str(input_data.get("paragraph", "")).strip()
-    if not paragraph:
-        return "FEHLER: Kein Paragraph angegeben."
-
-    abkuerzung = str(input_data.get("gesetz", "BGB")).strip() or "BGB"
-    gesetz = load_gesetz(abkuerzung)
-    if gesetz is None:
-        verfuegbar = ", ".join(g.upper() for g in list_gesetze())
+    try:
+        result = _client.lookup_norm(input_data)
+    except LegalSourceUnavailable as exc:
+        log.warning("lookup_norm unavailable: %s", exc)
         return (
-            f"FEHLER: Gesetz {abkuerzung!r} nicht im Korpus. "
-            f"Verfügbar: {verfuegbar}."
+            "Fehler: Rechtsquelle gerade nicht erreichbar. "
+            "Bitte später erneut versuchen oder dem Anwalt mitteilen."
         )
+    if "error" in result:
+        return result.get("message") or f"Fehler: {result['error']}"
+    return _format_success(result)
 
-    norm = gesetz.get(paragraph)
-    if norm is None:
-        verfuegbare = ", ".join(gesetz.list_paragraphen())
-        return (
-            f"§ {paragraph} {gesetz.abkuerzung} ist im lokalen Korpus nicht enthalten.\n"
-            f"Verfügbar: {verfuegbare}.\n"
-            f"Hinweis: Wenn die Vorschrift existiert, aber im Korpus fehlt, bitte "
-            f"'kira ingest {gesetz.abkuerzung.lower()}' ausführen oder den Anwalt "
-            f"informieren — NICHT aus dem Gedächtnis zitieren."
-        )
 
-    output = norm.to_display(stand=gesetz.stand)
-    warnung = stand_warnung(gesetz.stand)
-    if warnung:
-        output = f"{warnung}\n\n{output}"
-    return output
+def _format_success(r: dict[str, Any]) -> str:
+    lines = [f"{r['gesetz']} §{r['paragraph']} — {r.get('titel', '')}".rstrip(" —")]
+    if r.get("gesetz_titel"):
+        lines.append(f"({r['gesetz_titel']})")
+    lines.append("")
+    if r.get("wortlaut"):
+        lines.append(r["wortlaut"])
+    lines.append("")
+    if r.get("stand"):
+        lines.append(f"Stand: {r['stand']}")
+    if r.get("quelle_url"):
+        lines.append(f"Quelle: {r['quelle_url']}")
+    if r.get("stand_warnung"):
+        lines.append(f"WARNUNG: {r['stand_warnung']}")
+    return "\n".join(lines).rstrip()
 
 
 TOOL = register(
     Tool(
         name="lookup_norm",
         description=(
-            "Schlägt eine Vorschrift aus einem deutschen Gesetz im Wortlaut nach "
-            "(BGB, BetrKV, HeizkostenV — vollständige Liste via list_gesetze). "
-            "Verwende dieses Tool IMMER, BEVOR du eine Norm zitierst — niemals "
-            "aus dem Gedächtnis. Output enthält Stand-Datum und Quellen-URL zur "
-            "Verifikation durch den Anwalt."
+            "Schlägt einen einzelnen Paragraphen aus einem deutschen Bundesgesetz "
+            "oder einer Rechtsverordnung im Wortlaut nach. Der Korpus umfasst alle "
+            "~6.500 Gesetze von gesetze-im-internet.de und wird täglich aktualisiert. "
+            "Verwende dieses Tool IMMER, BEVOR du eine Norm zitierst — niemals aus "
+            "dem Gedächtnis. Output enthält Wortlaut, Stand und Quellen-URL."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "paragraph": {
-                    "type": "string",
-                    "description": "Paragraph-Nummer, z.B. '535', '536a', '§ 573 BGB'.",
-                },
                 "gesetz": {
                     "type": "string",
                     "description": (
-                        "Gesetzes-Abkürzung. Default: 'BGB'. "
-                        "Andere: 'BetrKV', 'HeizkostenV'."
+                        "Kanonische Gesetzes-Abkürzung wie im <jurabk>-Feld von "
+                        "gesetze-im-internet.de, z.B. 'BGB', 'WoEigG', 'BetrKV'."
                     ),
-                    "default": "BGB",
+                },
+                "paragraph": {
+                    "type": "string",
+                    "description": "Paragraph-Nummer, z.B. '535', '536a'.",
+                },
+                "absatz": {
+                    "type": "string",
+                    "description": "Optional: einzelner Absatz, z.B. '1'.",
                 },
             },
-            "required": ["paragraph"],
+            "required": ["gesetz", "paragraph"],
         },
         run=run,
     )
