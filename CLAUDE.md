@@ -23,8 +23,6 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/kira demo                                 # runs the example case end-to-end
 .venv/bin/kira ask <sachverhalt.md> --frage "..."   # ad-hoc question
 .venv/bin/kira ask <…> --force-tier opus            # override routing (haiku|sonnet|opus); also on `demo`
-.venv/bin/kira ingest [bgb betrkv heizkostenv]      # refresh law corpus from gesetze-im-internet.de
-
 # lint
 .venv/bin/ruff check src/ tests/
 ```
@@ -62,20 +60,33 @@ Parties are declared in YAML front-matter at the top of each Sachverhalt markdow
 
 ### Knowledge / law corpus
 
-`knowledge/loader.py` loads German laws with this precedence:
+The agent reads its legal corpus from the deployed `kira-legal-lookup-norm`
+and `kira-legal-search` Lambdas in `eu-central-1`. The corpus covers all
+~6,474 Bundesgesetze + Rechtsverordnungen from gesetze-im-internet.de and
+refreshes daily via the ingest Lambda.
 
-1. Overlay directory `./data/gesetze/<abk>.json` (written by `kira ingest`).
-2. Package-bundled JSON in `src/kira/knowledge/gesetze/`.
+`src/kira/agent/legal_client.py::LegalSourcesClient` is the boto3 wrapper
+the tools use. Region, function names, retry/timeout, and structured
+logging all live there — the agent tools and tests mock the client, not
+boto3 directly. The function names default to `kira-legal-lookup-norm` and
+`kira-legal-search` but can be overridden via `KIRA_LEGAL_LOOKUP_FN` /
+`KIRA_LEGAL_SEARCH_FN`.
 
-`kira ingest` downloads the official XML zip from gesetze-im-internet.de, parses it with `knowledge/xml_parser.py` (the gii-norm DTD format — `<norm>` containing `<metadaten>` and `<textdaten><text><Content><P>`), filters by paragraph range or list, writes JSON. The parser tolerates missing optional elements; tests use a synthetic fixture in `tests/test_xml_parser.py` rather than the live download.
-
-Each loaded `Gesetz` carries a `stand` date. `loader.stand_warnung()` returns a warning string when the corpus is ≥ 6 months old; the lookup tools embed this in their output and the system prompt instructs the agent to surface it under "Offene Punkte für den Anwalt".
+The XML parser and zip extractor used by the ingest Lambda live at
+`src/kira/legal_sources/_common/xml_parser.py` and
+`src/kira/legal_sources/_common/zip_extract.py`. The legal-sources module
+has no `kira.*` imports — it's extractable as a standalone package.
 
 ### Tools
 
 Tools register themselves on import via `_registry.register()`. Importing `kira.agent.tools` triggers all registrations. Each tool returns a plain string (the tool-result content). Categories:
 
-- **Norm tools** (`norm_lookup`, `norm_search`, `norm_list`) read from the local corpus only — they never hit the network.
+- **Norm tools** (`lookup_norm`, `search_norm`) call the deployed AWS
+  Lambdas via `LegalSourcesClient`. `lookup_norm` returns the authoritative
+  wortlaut + Stand + Quelle URL for one paragraph; `search_norm` does
+  semantic search and returns top-k candidate paragraphs with score
+  (excerpts only — citation must flow through `lookup_norm`). The corpus
+  is ~6,474 Bundesgesetze + Rechtsverordnungen.
 - **Rechtsprechung tools** (`urteil_fetch`) hit the network but are constrained by `ALLOWED_DOMAINS` (whitelist of official German jurisprudence sources). Redirects are re-checked against the whitelist. Results are cached in `./data/cache/urteile/`.
 - **`berechne_frist`** is deterministic Python — no LLM call. Used so the agent never invents dates.
 
@@ -104,7 +115,7 @@ Hard rules for this module (and its tests):
 - **Region pinned to `eu-central-1`** for every AWS resource (S3, Lambda, EventBridge, Gateway target). The existing `bedrock_eu` policy in `llm/client.py` already enforces this for Bedrock; the legal-sources module mirrors it for everything else.
 - **PII boundary**: pseudonymization stays inside the agent process. The legal-sources tools only ever receive structured legal references (`§`-numbers, Aktenzeichen, Gericht) — never client text. Tool input schemas reject free-text fields that could leak.
 
-V1 scope is **Tool 1 only — `lookup_norm`** against gesetze-im-internet.de. Tool 2 (`fetch_urteil` against rechtsprechung-im-internet.de, with an S3 Vectors index for future semantic search) is **explicitly deferred** until Tool 1 is fully deployed to AWS and validated against all test tiers. Do not start Tool 2 work without re-confirmation.
+V2 (deployed) covers all ~6,500 Bundesgesetze and Rechtsverordnungen with `lookup_norm` + `search_norm`. V3 (in this branch) wires those tools into KIRA's agent loop, replacing the bundled-JSON path. Tool 2 (`fetch_urteil` against rechtsprechung-im-internet.de, with an S3 Vectors index for future semantic search) is **explicitly deferred** until the wired lookup/search path is validated in production. Do not start Tool 2 work without re-confirmation.
 
 The current design spec lives at `docs/superpowers/specs/2026-05-09-legal-sources-tool1-design.md`.
 
