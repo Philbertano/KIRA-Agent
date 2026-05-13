@@ -16,11 +16,11 @@ import botocore.exceptions
 import httpx
 
 from kira.legal_sources._common.embedder import CohereMultilingualEmbedder
-from kira.legal_sources._common.xml_parser import parse_gii_xml
-from kira.legal_sources._common.zip_extract import extract_xml_from_zip
 from kira.legal_sources._common.region import REQUIRED_REGION
 from kira.legal_sources._common.toc import fetch_toc, is_citable, slug_for
 from kira.legal_sources._common.vector_index import VectorIndex, VectorRecord
+from kira.legal_sources._common.xml_parser import parse_gii_xml
+from kira.legal_sources._common.zip_extract import extract_xml_from_zip
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
