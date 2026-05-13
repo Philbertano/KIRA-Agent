@@ -15,7 +15,10 @@ def _success_response() -> dict:
         "paragraph": "535",
         "absatz": None,
         "titel": "Inhalt und Hauptpflichten des Mietvertrags",
-        "wortlaut": "(1) Durch den Mietvertrag wird der Vermieter…\n\n(2) Der Mieter ist verpflichtet…",
+        "wortlaut": (
+            "(1) Durch den Mietvertrag wird der Vermieter…\n\n"
+            "(2) Der Mieter ist verpflichtet…"
+        ),
         "stand": "2026-05-11",
         "quelle_url": "https://www.gesetze-im-internet.de/bgb/__535.html",
         "stand_warnung": None,

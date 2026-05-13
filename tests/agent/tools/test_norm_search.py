@@ -16,7 +16,10 @@ def _hits_response() -> dict:
                 "gesetz": "BGB",
                 "paragraph": "536",
                 "titel": "Mietminderung bei Sach- und Rechtsmängeln",
-                "wortlaut": "(1) Hat die Mietsache zur Zeit der Überlassung an den Mieter einen Mangel…",
+                "wortlaut": (
+                    "(1) Hat die Mietsache zur Zeit der Überlassung "
+                    "an den Mieter einen Mangel…"
+                ),
                 "score": 0.689,
                 "quelle_url": "https://www.gesetze-im-internet.de/bgb/__536.html",
                 "stand": "2026-05-11",
@@ -72,7 +75,10 @@ def test_unavailable_returns_german_error_string() -> None:
 
 def test_validation_error_passes_through() -> None:
     fake = MagicMock()
-    fake.search_norm.return_value = {"error": "validation_error", "message": "Field required: query"}
+    fake.search_norm.return_value = {
+        "error": "validation_error",
+        "message": "Field required: query",
+    }
     with patch.object(norm_search, "_client", fake):
         output = norm_search.run({"query": ""})
     assert "Field required" in output or "validation_error" in output
