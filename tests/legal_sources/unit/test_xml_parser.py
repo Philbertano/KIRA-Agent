@@ -14,7 +14,6 @@ import pytest
 
 from kira.legal_sources._common.xml_parser import normalize_paragraph, parse_gii_xml
 
-
 FIXTURE_BGB_AUSZUG = textwrap.dedent(
     """\
     <?xml version="1.0" encoding="utf-8"?>
