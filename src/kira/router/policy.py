@@ -35,7 +35,7 @@ class RoutingDecision:
 # Statische Routing-Tabelle.
 POLICY: dict[TaskType, ModelTier] = {
     TaskType.EXTRACT_SACHVERHALT: ModelTier.HAIKU,
-    TaskType.NORM_LOOKUP: ModelTier.HAIKU,
+    TaskType.NORM_LOOKUP: ModelTier.SONNET,
     TaskType.FRIST_BERECHNEN: ModelTier.HAIKU,
     TaskType.SCHRIFTSATZ_VORLAGE: ModelTier.SONNET,
     TaskType.RECHERCHE: ModelTier.SONNET,

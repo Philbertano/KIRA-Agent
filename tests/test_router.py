@@ -7,9 +7,11 @@ from kira.router import route
 from kira.router.policy import TaskType
 
 
-def test_routes_norm_lookup_to_haiku() -> None:
+def test_routes_norm_lookup_to_sonnet() -> None:
+    # V3: norm_lookup over the full 6,500-law corpus needs real reasoning to
+    # pick candidates (search_norm → lookup_norm pipeline), so Sonnet beats Haiku.
     decision = route("Was steht in § 535 BGB?")
-    assert decision.tier == ModelTier.HAIKU
+    assert decision.tier == ModelTier.SONNET
     assert decision.task_type == TaskType.NORM_LOOKUP
 
 

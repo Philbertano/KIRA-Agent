@@ -25,8 +25,8 @@ Backend = Literal["bedrock_eu", "anthropic_direct"]
 MODEL_IDS: dict[Backend, dict[ModelTier, str]] = {
     "bedrock_eu": {
         ModelTier.HAIKU: "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-        ModelTier.SONNET: "eu.anthropic.claude-sonnet-4-6-v1:0",
-        ModelTier.OPUS: "eu.anthropic.claude-opus-4-6-v1:0",
+        ModelTier.SONNET: "eu.anthropic.claude-sonnet-4-6",
+        ModelTier.OPUS: "eu.anthropic.claude-opus-4-7",
     },
     "anthropic_direct": {
         ModelTier.HAIKU: "claude-haiku-4-5-20251001",
