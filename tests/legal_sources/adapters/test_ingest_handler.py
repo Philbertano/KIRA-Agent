@@ -228,7 +228,7 @@ def test_ingest_uses_xml_jurabk_not_slug_upper(
     monkeypatch.setenv("LEGAL_CORPUS_BUCKET", s3_target)
     mock_aws_clients["embedder"].embed_documents.return_value = [[0.1] * 1024]
 
-    from kira.knowledge.xml_parser import Norm, ParseResult
+    from kira.legal_sources._common.xml_parser import Norm, ParseResult
 
     fake_parse_result = ParseResult(
         abkuerzung="CANONICAL-ABK",

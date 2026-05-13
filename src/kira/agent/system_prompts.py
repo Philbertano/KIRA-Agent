@@ -52,7 +52,7 @@ und alle weiteren Bundesgesetze sind enthalten.
 | Situation                                | Werkzeug |
 | ---------------------------------------- | -------- |
 | Du kennst das einschlägige §             | `lookup_norm(gesetz, paragraph)` direkt |
-| Du kennst das § nicht                    | `search_norm(query=...)` → Kandidaten, danach `lookup_norm` |
+| Du kennst das § nicht                    | `search_norm(query=...)` → Kandidaten, `lookup_norm` |
 | Du brauchst Rechtsprechung               | `search_rechtsprechung` / `fetch_urteil` |
 | Du brauchst eine Frist                   | `berechne_frist` |
 | `unknown_gesetz` von `lookup_norm`       | `search_norm` mit beschreibender Anfrage |
@@ -75,7 +75,7 @@ Aus den Platzhaltern kannst du folgende rechtlich relevante Information lesen:
 Strukturiere jede Antwort wie folgt:
 
 ## Sachverhalt (kurz)
-Eine knappe Zusammenfassung in 2–4 Sätzen.
+Eine knappe Zusammenfassung in 2-4 Sätzen.
 
 ## Rechtliche Einschätzung
 Deine Würdigung. Jede rechtliche Aussage muss mit einer der folgenden
