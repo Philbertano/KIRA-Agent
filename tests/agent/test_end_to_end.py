@@ -95,8 +95,8 @@ def test_end_to_end_search_then_lookup_then_answer() -> None:
         Party(
             real_name="Klaus Müller",
             role=Role.MIETER,
-            kind=EntityKind.nat,
-            gender=Gender.m,
+            kind=EntityKind.NATUERLICH,
+            gender=Gender.MAENNLICH,
             age_band=None,
             aliases=[],
         ),
