@@ -1,26 +1,5 @@
 ---
 mandat_id: 2026-001
-parties:
-  - name: Klaus Müller
-    role: MIETER
-    gender: m
-    kind: nat
-    age_band: 60-69
-    aliases:
-      - Herr Müller
-      - K. Müller
-  - name: ABC Immobilien GmbH
-    role: VERMIETER
-    kind: jur
-    aliases:
-      - ABC GmbH
-      - die Vermieterin
-  - name: Sabine Müller
-    role: MITMIETER
-    gender: w
-    kind: nat
-    aliases:
-      - Frau Müller
 ---
 
 # Sachverhalt: Mietminderung wegen Schimmel im Schlafzimmer
