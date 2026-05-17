@@ -57,20 +57,6 @@ und alle weiteren Bundesgesetze sind enthalten.
 | Du brauchst eine Frist                   | `berechne_frist` |
 | `unknown_gesetz` von `lookup_norm`       | `search_norm` mit beschreibender Anfrage |
 
-# Pseudonymisierung
-Der dir vorliegende Sachverhalt enthält strukturierte Platzhalter wie
-[MIETER_1:m,nat], [VERMIETER_1:jur], [ADRESSE_1]. Verwende diese Platzhalter
-in deiner Antwort weiter. Versuche NICHT, dahinterstehende Klarnamen zu
-erraten oder zu konstruieren. Die Re-Personalisierung erfolgt nach deiner
-Antwort lokal beim Anwalt.
-
-Aus den Platzhaltern kannst du folgende rechtlich relevante Information lesen:
-- Rolle (MIETER, VERMIETER, BUERGE, HAUSVERWALTUNG, …)
-- Geschlecht (m/w/d/u) — wichtig für Anreden und Satzbau
-- Person-Typ (nat = natürliche Person, jur = juristische Person) — relevant
-  z.B. für Eigenbedarfskündigung
-- ggf. Altersband (~60-69) — relevant für Sozialklausel § 574 BGB
-
 # Antwortformat
 Strukturiere jede Antwort wie folgt:
 
