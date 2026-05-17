@@ -15,7 +15,6 @@ import pytest
 
 from kira.agent import Agent
 from kira.llm.models import ModelTier
-from kira.pseudonymizer import EntityKind, Gender, Party, Role
 from kira.router import route
 
 pytestmark = pytest.mark.skipif(
@@ -91,21 +90,10 @@ class _StubLLMClient:
 
 
 def test_end_to_end_search_then_lookup_then_answer() -> None:
-    parties = [
-        Party(
-            real_name="Klaus Müller",
-            role=Role.MIETER,
-            kind=EntityKind.NATUERLICH,
-            gender=Gender.MAENNLICH,
-            age_band=None,
-            aliases=[],
-        ),
-    ]
     routing = route("Mietminderung wegen Schimmel?")
     agent = Agent(client=_StubLLMClient())
     result = agent.run(
         "Mietminderung wegen Schimmel?\n\nMein Mandant Klaus Müller hat Schimmel.",
-        parties=parties,
         routing=routing,
     )
     assert "§ 536 BGB" in result.final_text

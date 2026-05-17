@@ -20,5 +20,10 @@ def test_known_subcommands_still_present() -> None:
     assert result.exit_code == 0
     assert "ask" in result.stdout
     assert "demo" in result.stdout
-    assert "check-pseudonymisierung" in result.stdout
+    assert "check-pseudonymisierung" not in result.stdout
     assert "ingest" not in result.stdout
+
+
+def test_check_pseudo_subcommand_is_gone() -> None:
+    result = runner.invoke(app, ["check-pseudonymisierung", "some_file.md"])
+    assert result.exit_code != 0
