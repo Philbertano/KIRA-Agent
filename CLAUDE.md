@@ -13,13 +13,12 @@ KIRA is a junior-associate AI agent for German rental law (Mietrecht), built wit
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 # tests
-.venv/bin/python -m pytest tests/                   # full suite (~56 tests)
-.venv/bin/python -m pytest tests/test_pseudonymizer.py -v   # one file
-.venv/bin/python -m pytest tests/test_tools.py::test_norm_lookup_bgb_535   # one test
+.venv/bin/python -m pytest tests/ -m 'not live and not perf'   # full unit suite
+.venv/bin/python -m pytest tests/agent/test_legal_client.py -v # one file
+RUN_LIVE_TESTS=1 .venv/bin/python -m pytest tests/agent/test_legal_client_live.py tests/agent/test_end_to_end.py -v   # live AWS tests
 .venv/bin/python -m pytest --cov=kira tests/        # with coverage (pytest-cov is in [dev])
 
 # CLI (entry point: kira)
-.venv/bin/kira check-pseudonymisierung data/beispielsachverhalte/001_mietminderung_schimmel.md
 .venv/bin/kira demo                                 # runs the example case end-to-end
 .venv/bin/kira ask <sachverhalt.md> --frage "..."   # ad-hoc question
 .venv/bin/kira ask <…> --force-tier opus            # override routing (haiku|sonnet|opus); also on `demo`
@@ -35,28 +34,22 @@ Other knobs (see `.env.example`):
 
 - `KIRA_DEFAULT_MODEL` — default tier when the router has no opinion (`haiku|sonnet|opus`).
 - `KIRA_LOG_LEVEL` — standard logging level.
-- `KIRA_PSEUDONYM_KEY_PATH` — path to the encryption key for the mapping store (real-name ↔ placeholder). If the file is missing it gets generated; losing it makes existing mappings unrecoverable.
+- `KIRA_LEGAL_LOOKUP_FN` / `KIRA_LEGAL_SEARCH_FN` — override the deployed legal-sources Lambda names (defaults: `kira-legal-lookup-norm`, `kira-legal-search`).
 - `KIRA_CACHE_DIR` — overrides `./data/cache/` (used by `urteil_fetch`).
 - `KIRA_ALLOW_DIRECT_API=1` — opt-in to the `anthropic_direct` backend; only for synthetic-data testing (see "LLM client abstraction" below).
 
 ## Architecture
 
-The agent runs a **manual tool-use loop** (in `agent/core.py`) — not the higher-level Agent SDK harness — so we keep full control over pseudonymization and routing. Each `Agent.run()` call walks this pipeline:
+The agent runs a **manual tool-use loop** (in `agent/core.py`) — not the higher-level Agent SDK harness — so we keep full control over model routing and tool dispatch. Each `Agent.run()` call walks this pipeline:
 
-1. **Pseudonymize** the user query against `Party` definitions (role/gender/kind/age-band) → produces structured placeholders like `[MIETER_1:m,nat,~60-69]`.
-2. **Leakage check** — regex scan for residual PII and party names. Hard-fails (`LeakageError`) before any LLM call. If this triggers, do not bypass it; investigate.
-3. **Tool-use loop** against the configured Bedrock model. Tools registered in `agent/tools/_registry.py::REGISTRY`.
-4. **Re-personalize** the final assistant text locally (placeholders → real names) before returning.
+1. **Tool-use loop** against the routed Bedrock model. Tools registered in `agent/tools/_registry.py::REGISTRY`.
+2. **Final assistant text** is returned verbatim — real names, real amounts, real dates — so the lawyer can paste directly into Outlook/Word.
 
-### Pseudonymizer subtlety
-
-In `pseudonymizer/pipeline.py`, **PII patterns (email/IBAN/phone/address) must run before party-name substitution** — otherwise names get replaced inside email addresses (`klaus.mueller@example.de` → `klaus.[MIETER_1]@example.de`). This bit us once; the test `test_email_replacement` enforces the order.
-
-Parties are declared in YAML front-matter at the top of each Sachverhalt markdown file (fields: `name`, `role` ∈ {`MIETER`, `VERMIETER`, `MITMIETER`, `BUERGE`, …}, `gender` ∈ {`m`,`w`,`d`,`u`}, `kind` ∈ {`nat`,`jur`}, optional `age_band`, optional `aliases[]`). The structured placeholders preserve exactly those attributes — anything outside this schema is by design invisible to the model.
+PII handling: KIRA does **not** pseudonymize. Compliance (BRAO §43e, DSGVO Art. 28/32) is achieved via AWS Bedrock DPA + EU residency (eu-central-1) + Microsoft 365 EU Data Boundary + chained Verschwiegenheitsverpflichtung — pseudonymization was removed 2026-05-17 after legal review confirmed it isn't required when the DPA chain is in place. See `docs/superpowers/specs/` for rationale.
 
 ### Model router
 
-`router/rule_based.py::route()` classifies the query via keyword match into a `TaskType`, then maps to `ModelTier` via `router/policy.py::POLICY`. Tiers are abstract (HAIKU/SONNET/OPUS); concrete model IDs live in `llm/models.py::MODEL_IDS` per backend. The router auto-escalates SONNET→OPUS for long/multi-clause queries (heuristic in `_complexity_signal`). `force_tier` always wins. There's also a Haiku-based classifier fallback in `router/classifier.py` that is **not yet wired into the main route()** — it's available but only called when explicitly invoked. If you do wire it in, it must run **after** pseudonymization, not before — the classifier is itself an LLM call and must never see clear PII.
+`router/rule_based.py::route()` classifies the query via keyword match into a `TaskType`, then maps to `ModelTier` via `router/policy.py::POLICY`. Tiers are abstract (HAIKU/SONNET/OPUS); concrete model IDs live in `llm/models.py::MODEL_IDS` per backend. The router auto-escalates SONNET→OPUS for long/multi-clause queries (heuristic in `_complexity_signal`). `force_tier` always wins. There's also a Haiku-based classifier fallback in `router/classifier.py` that is **not yet wired into the main route()** — it's available but only called when explicitly invoked.
 
 ### Knowledge / law corpus
 
@@ -122,6 +115,5 @@ The current design spec lives at `docs/superpowers/specs/2026-05-09-legal-source
 ## Conventions
 
 - Code, docstrings, comments and user-facing text are in **German** (matches the legal domain). Tests, however, use English-style identifiers.
-- Tests for the pseudonymizer are the most safety-critical — if they go red, do not weaken assertions to make them pass; investigate. A pseudonymizer regression risks leaking client data to the cloud.
 - Never push to `main` without explicit instruction; ask before creating new remote branches.
 - Only ruff is enforced (rules `E,F,I,B,UP,SIM,RUF`, line-length 100, target `py311` — see `pyproject.toml`). `mypy` is installed in `[dev]` but has no project config; treat type errors as advisory unless the user wires it up.
